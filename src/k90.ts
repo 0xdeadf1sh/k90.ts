@@ -1,4 +1,5 @@
 import packageJson from "../package.json";
+import wgslBasicCode from "../shaders/basic.wgsl?raw";
 
 ///////////////////////////////////////////////////////////////////////////
 ///////////////////////////////// CONSTANTS ///////////////////////////////
@@ -71,10 +72,14 @@ class Renderer {
     ////////////////////////////// WEBGPU CONTEXT /////////////////////////////
     ///////////////////////////////////////////////////////////////////////////
     private readonly canvas: HTMLCanvasElement;
-    private readonly adapter: GPUAdapter;
     private readonly device: GPUDevice;
     private readonly context: GPUCanvasContext;
     private readonly presentationFormat: GPUTextureFormat;
+
+    ///////////////////////////////////////////////////////////////////////////
+    /////////////////////////////// PIPELINES /////////////////////////////////
+    ///////////////////////////////////////////////////////////////////////////
+    private readonly basicPipeline: GPURenderPipeline;
 
     ///////////////////////////////////////////////////////////////////////////
     /////////////////////////// WEBGPU INITIALIZATION /////////////////////////
@@ -94,13 +99,7 @@ class Renderer {
             throw new Error("Failed to retrieve GPU adapter!");
         }
 
-        const deviceDescriptor: GPUDeviceDescriptor = {
-            defaultQueue: undefined,
-            requiredFeatures: [],
-            requiredLimits: {},
-        };
-
-        const device = await adapter.requestDevice(deviceDescriptor);
+        const device = await adapter.requestDevice({});
         if (!device) {
             throw new Error("Failed to retrieve GPU device!");
         }
@@ -122,7 +121,6 @@ class Renderer {
     ///////////////////////////////////////////////////////////////////////////
     private constructor(params: RendererConstructorParams) {
         this.canvas = params.canvas;
-        this.adapter = params.adapter;
         this.device = params.device;
 
         const context = this.canvas.getContext("webgpu") as GPUCanvasContext;
@@ -145,10 +143,53 @@ class Renderer {
         Logger.info(`k90.ts description: ${packageJson.description}`);
 
         Logger.info(`canvas format: ${this.presentationFormat}`);
+
+        const shaderModule = this.device.createShaderModule({
+            code: wgslBasicCode,
+            label: "basic.wgsl"
+        });
+
+        this.basicPipeline = this.device.createRenderPipeline({
+            label: "basic.wgsl",
+            layout: "auto",
+            vertex: {
+                module: shaderModule,
+            },
+            fragment: {
+                module: shaderModule,
+                targets: [{ format: this.presentationFormat }]
+            }
+        });
     }
 
     ///////////////////////////////////////////////////////////////////////////
     public render(): void {
+
+        const now = performance.now() * 1e-3;
+
+        const renderpassDescriptor: GPURenderPassDescriptor = {
+            label: "render pass descriptor for basic.wgsl",
+            colorAttachments: [{
+                clearValue: [Math.cos(now) * 0.5 + 0.5, 0.2, 0.2, 1.0],
+                loadOp: "clear",
+                storeOp: "store",
+                view: this.context.getCurrentTexture().createView(),
+            }]
+        };
+
+        const encoder = this.device.createCommandEncoder({
+            label: "command encoder for basic.wgsl pipeline",
+        });
+
+        const pass = encoder.beginRenderPass(renderpassDescriptor);
+        pass.setPipeline(this.basicPipeline);
+        pass.draw(3);
+        pass.end();
+
+        const commandBuffer = encoder.finish();
+        this.device.queue.submit([commandBuffer]);
+
+        requestAnimationFrame(() => this.render());
     }
 }
 
@@ -158,6 +199,7 @@ class Renderer {
 async function main() {
     try {
         const renderer = await Renderer.create(K90_CANVAS_DIV_ID);
+        renderer.render();
     }
     catch (ex) {
         printException(ex);

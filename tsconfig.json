@@ -2,13 +2,17 @@
   "files": [
     "k90.ts"
   ],
+  "include": [
+      "src/**/*.ts",
+      "src/**/*.d.ts"
+  ],
   "compilerOptions": {
     "rootDir": "./src",
     "outDir": "./ts-build",
 
-    "module": "nodenext",
+    "module": "esnext",
     "target": "esnext",
-    "types": [ "@webgpu/types" ],
+    "types": [ "@webgpu/types", "vite/client" ],
 
     "sourceMap": true,
     "declaration": true,
