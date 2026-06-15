@@ -1,0 +1,48 @@
+{
+  "files": [
+    "k90.ts"
+  ],
+  "compilerOptions": {
+    "rootDir": "./src",
+    "outDir": "./ts-build",
+
+    "module": "nodenext",
+    "target": "esnext",
+    "types": [ "@webgpu/types" ],
+
+    "sourceMap": true,
+    "declaration": true,
+    "declarationMap": true,
+
+    "exactOptionalPropertyTypes": true,
+    "allowUnreachableCode": false,
+    "allowUnusedLabels": false,
+    "allowJs": false,
+    "useUnknownInCatchVariables": true,
+
+    "noUncheckedIndexedAccess": true,
+    "noImplicitReturns": true,
+    "noImplicitOverride": true,
+    "noImplicityAny": true,
+    "noImplicitThis": true,
+    "noUnusedLocals": true,
+    "noUncheckedSideEffectImports": true,
+    "noUnusedParameters": true,
+    "noFallthroughCasesInSwitch": true,
+    "noPropertyAccessFromIndexSignature": true,
+    "noUncheckedSideEffectImports": true,
+    "noEmitOnError": true,
+
+    "strict": true,
+    "alwaysStrict": true,
+    "forceConsistentCasingInFileNames": true,
+
+    "resolveJsonModule": true,
+    "esModuleInterop": false,
+
+    "verbatimModuleSyntax": true,
+    "isolatedModules": true,
+    "moduleDetection": "force",
+    "skipLibCheck": true,
+  }
+}

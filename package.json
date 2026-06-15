@@ -1,0 +1,27 @@
+{
+  "name": "k90.ts",
+  "version": "0.1.0",
+  "description": "WebGPU renderer for Xiaomi's Redmi K90 MAX",
+  "keywords": [
+    "webgpu",
+    "gpgpu",
+    "pbr",
+    "ibl",
+    "redmi-k90-max"
+  ],
+  "license": "GPL-3.0-or-later",
+  "author": "0xdeadf1sh",
+  "type": "module",
+  "main": "index.ts",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "start": "vite --host 0.0.0.0 --port 3000 --strictPort --cors --logLevel info --clearScreen",
+    "build": "vite build --force"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-basic-ssl": "^2.3.0",
+    "@webgpu/types": "^0.1.70",
+    "typescript": "^6.0.3",
+    "vite": "^8.0.16"
+  }
+}
