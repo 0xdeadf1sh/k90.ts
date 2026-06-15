@@ -6,11 +6,16 @@ import wgslBasicCode from "../shaders/basic.wgsl?raw";
 ///////////////////////////////////////////////////////////////////////////
 const K90_LOGGER_DIV_ID = "k90-logs";
 const K90_CANVAS_DIV_ID = "k90-renderer";
+const K90_DEBUG_UI_FPS = "k90-debug";
+const K90_RECOMMENDED_MIN_FPS = 50;
+const K90_WARNING_MIN_FPS = 30;
 
 ///////////////////////////////////////////////////////////////////////////
 ////////////////////////////////// LOGGING ////////////////////////////////
 ///////////////////////////////////////////////////////////////////////////
 class Logger {
+
+    ///////////////////////////////////////////////////////////////////////////
     private static _logDiv: HTMLDivElement;
 
     ///////////////////////////////////////////////////////////////////////////
@@ -55,6 +60,132 @@ class Logger {
 }
 
 ///////////////////////////////////////////////////////////////////////////
+////////////////////////// DELTA-TIME COMPUTATION /////////////////////////
+///////////////////////////////////////////////////////////////////////////
+class DeltaTime {
+
+    ///////////////////////////////////////////////////////////////////////////
+    private previous: number;
+
+    ///////////////////////////////////////////////////////////////////////////
+    public constructor() {
+        this.previous = performance.now();
+    }
+
+    ///////////////////////////////////////////////////////////////////////////
+    public dt(): number {
+        const now = performance.now();
+        const deltaTime = now - this.previous;
+        this.previous = now;
+        return deltaTime;
+    }
+}
+
+///////////////////////////////////////////////////////////////////////////
+////////////////////////// PERFORMANCE ELEMENTS ///////////////////////////
+///////////////////////////////////////////////////////////////////////////
+class DebugUI {
+
+    ///////////////////////////////////////////////////////////////////////////
+    private readonly debugDiv: HTMLDivElement;
+
+    ///////////////////////////////////////////////////////////////////////////
+    private prevTime: number;
+    private frameCount: number;
+    private totalFPS: number;
+
+    ///////////////////////////////////////////////////////////////////////////
+    private prevRender: number;
+    private totalRender: number;
+
+    ///////////////////////////////////////////////////////////////////////////
+    public constructor(private readonly canvas: HTMLCanvasElement,
+        private readonly delayMS: number) {
+
+        const debugDiv = document.getElementById(K90_DEBUG_UI_FPS);
+        if (!debugDiv) {
+            throw new Error(`debug div with id '${K90_DEBUG_UI_FPS}' doesn't exist!`);
+        }
+
+        this.prevTime = 0;
+        this.frameCount = 0;
+        this.totalFPS = 0;
+
+        this.prevRender = 0;
+        this.totalRender = 0;
+
+        this.debugDiv = debugDiv as HTMLDivElement;
+    }
+
+    ///////////////////////////////////////////////////////////////////////////
+    private printAvgFPS() {
+        const avgFPS = this.totalFPS / this.frameCount;
+
+        if (avgFPS >= K90_RECOMMENDED_MIN_FPS) {
+            this.debugDiv.innerHTML += `<span style='color: #00ff00;'>FPS: ${avgFPS.toFixed(2)}</span><br>`;
+        }
+        else if (avgFPS >= K90_WARNING_MIN_FPS) {
+            this.debugDiv.innerHTML += `<span style='color: #ffff00;'>FPS: ${avgFPS.toFixed(2)}</span><br>`;
+        }
+        else {
+            this.debugDiv.innerHTML += `<span style='color: #ff0000;'>FPS: ${avgFPS.toFixed(2)}</span><br>`;
+        }
+
+        this.totalFPS = 0.0;
+    }
+
+    ///////////////////////////////////////////////////////////////////////////
+    private printResolution() {
+        this.debugDiv.innerHTML += `RES: ${this.canvas.width} x ${this.canvas.height}`;
+    }
+
+    ///////////////////////////////////////////////////////////////////////////
+    private printAvgRenderFPS() {
+        const avgRenderFPS = (this.totalRender / this.frameCount);
+        this.debugDiv.innerHTML += `RENDER: ${avgRenderFPS.toFixed(2)} MS<br>`;
+        this.totalRender = 0.0;
+    }
+
+    ///////////////////////////////////////////////////////////////////////////
+    public update() {
+        this.frameCount += 1;
+
+        const now = performance.now();
+        if (now - this.prevTime >= this.delayMS) {
+            this.debugDiv.innerHTML = "";
+
+            this.printAvgFPS();
+            this.printAvgRenderFPS();
+            this.printResolution();
+
+            this.prevTime = now;
+            this.frameCount = 1;
+        }
+    }
+
+    ///////////////////////////////////////////////////////////////////////////
+    public writeFPS(fps: number) {
+        this.totalFPS += fps;
+    }
+
+    ///////////////////////////////////////////////////////////////////////////
+    public writeDT(dt: number) {
+        this.totalFPS += 1000.0 / dt;
+    }
+
+    ///////////////////////////////////////////////////////////////////////////
+    public beginRender() {
+        this.prevRender = performance.now();
+    }
+
+    ///////////////////////////////////////////////////////////////////////////
+    public endRender() {
+        const now = performance.now();
+        this.totalRender += now - this.prevRender;
+    }
+}
+
+///////////////////////////////////////////////////////////////////////////
 ///////////////////////////// RENDERER PARAMS /////////////////////////////
 ///////////////////////////////////////////////////////////////////////////
 interface RendererConstructorParams {
@@ -80,6 +211,17 @@ class Renderer {
     /////////////////////////////// PIPELINES /////////////////////////////////
     ///////////////////////////////////////////////////////////////////////////
     private readonly basicPipeline: GPURenderPipeline;
+
+    ///////////////////////////////////////////////////////////////////////////
+    ////////////////////////// PERFORMANCE METRICS ////////////////////////////
+    ///////////////////////////////////////////////////////////////////////////
+    private readonly deltaTime: DeltaTime;
+    private totalTime: number;
+
+    ///////////////////////////////////////////////////////////////////////////
+    //////////////////////////////// DEBUGGING ////////////////////////////////
+    ///////////////////////////////////////////////////////////////////////////
+    private readonly debugUI: DebugUI;
 
     ///////////////////////////////////////////////////////////////////////////
     /////////////////////////// WEBGPU INITIALIZATION /////////////////////////
@@ -160,17 +302,39 @@ class Renderer {
                 targets: [{ format: this.presentationFormat }]
             }
         });
+
+        this.deltaTime = new DeltaTime();
+        this.totalTime = 0.0;
+
+        this.debugUI = new DebugUI(this.canvas, 1000);
+    }
+
+    ///////////////////////////////////////////////////////////////////////////
+    private resize() {
+        const pixelRatio = window.devicePixelRatio;
+
+        const renderWidth = this.canvas.clientWidth * pixelRatio;
+        const renderHeight = this.canvas.clientHeight * pixelRatio;
+
+        if (this.canvas.width !== renderWidth || this.canvas.height !== renderHeight) {
+            this.canvas.width = renderWidth;
+            this.canvas.height = renderHeight;
+        }
     }
 
     ///////////////////////////////////////////////////////////////////////////
     public render(): void {
 
-        const now = performance.now() * 1e-3;
+        this.debugUI.beginRender();
+        this.resize();
+
+        const dt = this.deltaTime.dt();
+        this.totalTime += dt * 1e-3;
 
         const renderpassDescriptor: GPURenderPassDescriptor = {
             label: "render pass descriptor for basic.wgsl",
             colorAttachments: [{
-                clearValue: [Math.cos(now) * 0.5 + 0.5, 0.2, 0.2, 1.0],
+                clearValue: [Math.cos(this.totalTime) * 0.5 + 0.5, 0.2, 0.2, 1.0],
                 loadOp: "clear",
                 storeOp: "store",
                 view: this.context.getCurrentTexture().createView(),
@@ -188,6 +352,11 @@ class Renderer {
 
         const commandBuffer = encoder.finish();
         this.device.queue.submit([commandBuffer]);
+
+        this.debugUI.endRender();
+
+        this.debugUI.writeDT(dt);
+        this.debugUI.update();
 
         requestAnimationFrame(() => this.render());
     }

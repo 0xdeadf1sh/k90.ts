@@ -1,3 +1,8 @@
+* {
+    margin: 0;
+    padding: 0;
+}
+
 html, body {
     background-color: black;
     color: white;
@@ -12,7 +17,6 @@ html, body {
 }
 
 canvas#k90-renderer {
-
 }
 
 div#k90-exception {
@@ -37,4 +41,12 @@ div#k90-logs {
     overflow: scroll;
     display: flex;
     flex-direction: column;
+}
+
+div#k90-debug {
+    color: #00ff00;
+    position: absolute;
+    margin: 10px;
+    font-weight: bold;
+    font-size: 0.7em;
 }
