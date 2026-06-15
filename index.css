@@ -17,6 +17,8 @@ html, body {
 }
 
 canvas#k90-renderer {
+    padding: 0;
+    margin: 0;
 }
 
 div#k90-exception {
@@ -26,6 +28,8 @@ div#k90-exception {
     justify-content: center;
     align-items: center;
     height: 100%;
+    width: 90%;
+    margin-left: 10%;
 }
 
 div#k90-logs {

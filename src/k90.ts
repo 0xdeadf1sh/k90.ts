@@ -11,9 +11,20 @@ const K90_RECOMMENDED_MIN_FPS = 50;
 const K90_WARNING_MIN_FPS = 30;
 
 ///////////////////////////////////////////////////////////////////////////
+///////////////////////////////// UTILITIES ///////////////////////////////
+///////////////////////////////////////////////////////////////////////////
+class Util {
+
+    ///////////////////////////////////////////////////////////////////////////
+    public static clamp(k: number, min: number, max: number): number {
+        return Math.min(max, Math.max(k, min));
+    }
+}
+
+///////////////////////////////////////////////////////////////////////////
 ////////////////////////////////// LOGGING ////////////////////////////////
 ///////////////////////////////////////////////////////////////////////////
-class Logger {
+class Log {
 
     ///////////////////////////////////////////////////////////////////////////
     private static _logDiv: HTMLDivElement;
@@ -241,6 +252,10 @@ class Renderer {
             throw new Error("Failed to retrieve GPU adapter!");
         }
 
+        Log.info(`gpu: ${adapter.info.description}`);
+        Log.info(`arch: ${adapter.info.architecture}`);
+        Log.info(`vendor: ${adapter.info.vendor}`);
+
         const device = await adapter.requestDevice({});
         if (!device) {
             throw new Error("Failed to retrieve GPU device!");
@@ -265,6 +280,10 @@ class Renderer {
         this.canvas = params.canvas;
         this.device = params.device;
 
+        this.device.lost.then(info => {
+            throw new Error(`GPU device LOST due to ${info.reason}`);
+        });
+
         const context = this.canvas.getContext("webgpu") as GPUCanvasContext;
         if (!context) {
             throw new Error("Failed to retrieve GPU context!");
@@ -276,15 +295,15 @@ class Renderer {
         this.context.configure({
             device: this.device,
             format: this.presentationFormat,
-            colorSpace: "srgb"
+            colorSpace: "srgb",
         });
 
-        Logger.info(`k90.ts version: ${packageJson.version}`);
-        Logger.info(`k90.ts author: ${packageJson.author}`);
-        Logger.info(`k90.ts license: ${packageJson.license}`);
-        Logger.info(`k90.ts description: ${packageJson.description}`);
+        Log.info(`k90.ts version: ${packageJson.version}`);
+        Log.info(`k90.ts author: ${packageJson.author}`);
+        Log.info(`k90.ts license: ${packageJson.license}`);
+        Log.info(`k90.ts description: ${packageJson.description}`);
 
-        Logger.info(`canvas format: ${this.presentationFormat}`);
+        Log.info(`canvas format: ${this.presentationFormat}`);
 
         const shaderModule = this.device.createShaderModule({
             code: wgslBasicCode,
@@ -307,26 +326,39 @@ class Renderer {
         this.totalTime = 0.0;
 
         this.debugUI = new DebugUI(this.canvas, 1000);
-    }
 
-    ///////////////////////////////////////////////////////////////////////////
-    private resize() {
-        const pixelRatio = window.devicePixelRatio;
+        const resizeObserver = new ResizeObserver(entries => {
+            for (const entry of entries) {
+                let width = entry.devicePixelContentBoxSize[0]?.inlineSize ?? 0;
+                let height = entry.devicePixelContentBoxSize[0]?.blockSize ?? 0;
 
-        const renderWidth = this.canvas.clientWidth * pixelRatio;
-        const renderHeight = this.canvas.clientHeight * pixelRatio;
+                if (!width || !height) {
+                    Log.warn("Rendering is NOT pixel-perfect");
 
-        if (this.canvas.width !== renderWidth || this.canvas.height !== renderHeight) {
-            this.canvas.width = renderWidth;
-            this.canvas.height = renderHeight;
-        }
+                    const devicePixelRatio = window.devicePixelRatio;
+                    width = Math.floor(this.canvas.clientWidth * devicePixelRatio);
+                    height = Math.floor(this.canvas.clientHeight * devicePixelRatio);
+                }
+
+                width = Util.clamp(width, 1, this.device.limits.maxTextureDimension2D);
+                height = Util.clamp(height, 1, this.device.limits.maxTextureDimension2D);
+
+                if (this.canvas.width !== width || this.canvas.height !== height) {
+                    Log.info(`Resizing from ${this.canvas.width} x ${this.canvas.height} to ${width} x ${height}`);
+
+                    this.canvas.width = width;
+                    this.canvas.height = height;
+                }
+            }
+        });
+
+        resizeObserver.observe(this.canvas);
     }
 
     ///////////////////////////////////////////////////////////////////////////
     public render(): void {
 
         this.debugUI.beginRender();
-        this.resize();
 
         const dt = this.deltaTime.dt();
         this.totalTime += dt * 1e-3;
