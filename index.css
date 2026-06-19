@@ -7,6 +7,7 @@ html, body {
     background-color: black;
     color: white;
     overflow: none;
+    font-family: monospace;
 }
 
 .fullscreen {
@@ -34,13 +35,12 @@ div#k90-exception {
 
 div#k90-logs {
     background-color: rgba(0, 0, 0, 0.8);
-    font-size: 0.8em;
     padding: 10px;
-    height: 100px;
+    height: 150px;
     border: 1px solid white;
-    bottom: 30px;
-    left: 30px;
-    right: 30px;
+    bottom: 20px;
+    left: 10px;
+    right: 10px;
     position: absolute;
     overflow: scroll;
     display: flex;
@@ -52,5 +52,4 @@ div#k90-debug {
     position: absolute;
     margin: 10px;
     font-weight: bold;
-    font-size: 0.7em;
 }

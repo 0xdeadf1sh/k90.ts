@@ -9,6 +9,7 @@ const K90_CANVAS_DIV_ID = "k90-renderer";
 const K90_DEBUG_UI_FPS = "k90-debug";
 const K90_RECOMMENDED_MIN_FPS = 50;
 const K90_WARNING_MIN_FPS = 30;
+const K90_MAX_LOGS = 100;
 
 ///////////////////////////////////////////////////////////////////////////
 ///////////////////////////////// UTILITIES ///////////////////////////////
@@ -19,6 +20,13 @@ class Util {
     public static clamp(k: number, min: number, max: number): number {
         return Math.min(max, Math.max(k, min));
     }
+
+    ///////////////////////////////////////////////////////////////////////////
+    public static async loadImageBitmap(url: string): Promise<ImageBitmap> {
+        const res = await fetch(url);
+        const blob = await res.blob();
+        return await createImageBitmap(blob, { colorSpaceConversion: "none" });
+    }
 }
 
 ///////////////////////////////////////////////////////////////////////////
@@ -28,6 +36,12 @@ class Log {
 
     ///////////////////////////////////////////////////////////////////////////
     private static _logDiv: HTMLDivElement;
+
+    ///////////////////////////////////////////////////////////////////////////
+    private static logCount: number = 0;
+
+    ///////////////////////////////////////////////////////////////////////////
+    private static lastLog: string = "";
 
     ///////////////////////////////////////////////////////////////////////////
     private static get logDiv(): HTMLDivElement {
@@ -52,21 +66,39 @@ class Log {
     }
 
     ///////////////////////////////////////////////////////////////////////////
+    private static canLog(log: string): boolean {
+        this.logCount += 1;
+        if (this.logCount == K90_MAX_LOGS) {
+            this.logDiv.innerHTML += `<span style='color: yellow;'>TOO MANY LOGS, MAX=${K90_MAX_LOGS}</span>`;
+            this.logDiv.scrollTop = this.logDiv.scrollHeight;
+        }
+        const res = this.logCount < K90_MAX_LOGS && log !== this.lastLog;;
+        this.lastLog = log;
+        return res;
+    }
+
+    ///////////////////////////////////////////////////////////////////////////
     public static info(message: string) {
-        this.logDiv.innerHTML += `<span style='color: lightgreen;'>${this.date}: ${message}</span>`;
-        this.logDiv.scrollTop = this.logDiv.scrollHeight;
+        if (Log.canLog(message)) {
+            this.logDiv.innerHTML += `<span style='color: lightgreen;'>${this.date}: ${message}</span>`;
+            this.logDiv.scrollTop = this.logDiv.scrollHeight;
+        }
     }
 
     ///////////////////////////////////////////////////////////////////////////
     public static warn(message: string) {
-        this.logDiv.innerHTML += `<span style='color: yellow;'>${this.date}: ${message}</span>`;
-        this.logDiv.scrollTop = this.logDiv.scrollHeight;
+        if (Log.canLog(message)) {
+            this.logDiv.innerHTML += `<span style='color: yellow;'>${this.date}: ${message}</span>`;
+            this.logDiv.scrollTop = this.logDiv.scrollHeight;
+        }
     }
 
     ///////////////////////////////////////////////////////////////////////////
     public static error(message: string) {
-        this.logDiv.innerHTML += `<span style='color: red;'>${this.date}: ${message}</span>`;
-        this.logDiv.scrollTop = this.logDiv.scrollHeight;
+        if (Log.canLog(message)) {
+            this.logDiv.innerHTML += `<span style='color: red;'>${this.date}: ${message}</span>`;
+            this.logDiv.scrollTop = this.logDiv.scrollHeight;
+        }
     }
 }
 
@@ -221,7 +253,28 @@ class Renderer {
     ///////////////////////////////////////////////////////////////////////////
     /////////////////////////////// PIPELINES /////////////////////////////////
     ///////////////////////////////////////////////////////////////////////////
-    private readonly basicPipeline: GPURenderPipeline;
+    private basicPipeline: GPURenderPipeline | undefined;
+
+    ///////////////////////////////////////////////////////////////////////////
+    ////////////////////////////// BIND GROUPS ////////////////////////////////
+    ///////////////////////////////////////////////////////////////////////////
+    private bindGroup0: GPUBindGroup | undefined;
+
+    ///////////////////////////////////////////////////////////////////////////
+    //////////////////////////// STORAGE BUFFERS //////////////////////////////
+    ///////////////////////////////////////////////////////////////////////////
+    private vertexBuffer: GPUBuffer | undefined;
+    private transformBuffer: GPUBuffer | undefined;
+
+    ///////////////////////////////////////////////////////////////////////////
+    //////////////////////////// INDEX BUFFERS ////////////////////////////////
+    ///////////////////////////////////////////////////////////////////////////
+    private indexBuffer: GPUBuffer | undefined;
+
+    ///////////////////////////////////////////////////////////////////////////
+    /////////////////////////////// SAMPLERS //////////////////////////////////
+    ///////////////////////////////////////////////////////////////////////////
+    private sampler: GPUSampler | undefined;
 
     ///////////////////////////////////////////////////////////////////////////
     ////////////////////////// PERFORMANCE METRICS ////////////////////////////
@@ -284,6 +337,11 @@ class Renderer {
             throw new Error(`GPU device LOST due to ${info.reason}`);
         });
 
+        this.device.addEventListener("uncapturederror", event => {
+            event.preventDefault();
+            Log.error(event.error.message);
+        });
+
         const context = this.canvas.getContext("webgpu") as GPUCanvasContext;
         if (!context) {
             throw new Error("Failed to retrieve GPU context!");
@@ -305,28 +363,16 @@ class Renderer {
 
         Log.info(`canvas format: ${this.presentationFormat}`);
 
-        const shaderModule = this.device.createShaderModule({
-            code: wgslBasicCode,
-            label: "basic.wgsl"
-        });
-
-        this.basicPipeline = this.device.createRenderPipeline({
-            label: "basic.wgsl",
-            layout: "auto",
-            vertex: {
-                module: shaderModule,
-            },
-            fragment: {
-                module: shaderModule,
-                targets: [{ format: this.presentationFormat }]
-            }
-        });
-
         this.deltaTime = new DeltaTime();
         this.totalTime = 0.0;
 
         this.debugUI = new DebugUI(this.canvas, 1000);
 
+        this.createResizeObserver();
+    }
+
+    ///////////////////////////////////////////////////////////////////////////
+    private createResizeObserver(): void {
         const resizeObserver = new ResizeObserver(entries => {
             for (const entry of entries) {
                 let width = entry.devicePixelContentBoxSize[0]?.inlineSize ?? 0;
@@ -356,17 +402,130 @@ class Renderer {
     }
 
     ///////////////////////////////////////////////////////////////////////////
-    public render(): void {
+    public async setup(): Promise<void> {
+        this.indexBuffer = this.device.createBuffer({
+            size: 6 * Uint16Array.BYTES_PER_ELEMENT,
+            usage: GPUBufferUsage.INDEX | GPUBufferUsage.COPY_DST,
+        });
 
+        this.device.queue.writeBuffer(this.indexBuffer,
+            0,
+            new Uint16Array([0, 1, 2, 2, 1, 3]));
+
+        const vboData = new Float32Array([
+            -0.5, -0.5, 0.0, 1.0,
+            1.0, 0.0, 0.0, 1.0,
+            0.0, 1.0,
+
+            0.0, 0.0,
+
+            0.5, -0.5, 0.0, 1.0,
+            0.0, 1.0, 0.0, 1.0,
+            1.0, 1.0,
+
+            0.0, 0.0,
+
+            -0.5, 0.5, 0.0, 1.0,
+            0.0, 0.0, 1.0, 1.0,
+            0.0, 0.0,
+
+            0.0, 0.0,
+
+            0.5, 0.5, 0.0, 1.0,
+            1.0, 1.0, 0.0, 1.0,
+            1.0, 0.0,
+
+            0.0, 0.0,]);
+
+        this.vertexBuffer = this.device.createBuffer({
+            size: vboData.byteLength,
+            usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
+        });
+
+        this.device.queue.writeBuffer(this.vertexBuffer,
+            0,
+            vboData);
+
+        this.transformBuffer = this.device.createBuffer({
+            size: 32 * Float32Array.BYTES_PER_ELEMENT,
+            usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
+        });
+
+        const shaderModule = this.device.createShaderModule({
+            code: wgslBasicCode,
+            label: "basic.wgsl"
+        });
+
+        this.basicPipeline = this.device.createRenderPipeline({
+            label: "basic.wgsl",
+            layout: "auto",
+            vertex: {
+                module: shaderModule,
+            },
+            fragment: {
+                module: shaderModule,
+                targets: [{ format: this.presentationFormat }]
+            }
+        });
+
+        const textureURL = "/assets/textures/kiana.png";
+        const textureData = await Util.loadImageBitmap(textureURL);
+        const texture = this.device.createTexture({
+            label: textureURL,
+            format: "rgba8unorm-srgb",
+            size: [textureData.width, textureData.height, 1],
+            usage: GPUTextureUsage.TEXTURE_BINDING |
+                GPUTextureUsage.COPY_DST |
+                GPUTextureUsage.RENDER_ATTACHMENT,
+        });
+
+        this.device.queue.copyExternalImageToTexture({
+            source: textureData,
+            flipY: false,
+        }, {
+            texture: texture,
+        }, {
+            width: textureData.width,
+            height: textureData.height,
+        });
+
+        this.sampler = this.device.createSampler({
+            addressModeU: "repeat",
+            addressModeV: "repeat",
+            addressModeW: "repeat",
+            minFilter: "linear",
+            magFilter: "linear",
+            mipmapFilter: "linear",
+            maxAnisotropy: 4,
+        });
+
+        this.bindGroup0 = this.device.createBindGroup({
+            layout: this.basicPipeline.getBindGroupLayout(0),
+            entries: [
+                { binding: 0, resource: this.vertexBuffer },
+                { binding: 1, resource: this.transformBuffer },
+                { binding: 2, resource: this.sampler },
+                { binding: 3, resource: texture },
+            ]
+        });
+    }
+
+    ///////////////////////////////////////////////////////////////////////////
+    public render(): void {
         this.debugUI.beginRender();
 
         const dt = this.deltaTime.dt();
         this.totalTime += dt * 1e-3;
 
+        this.device.queue.writeBuffer(this.transformBuffer as GPUBuffer, 0, new Float32Array([-0.75, -0.75, 0.0, 0.0, 0.5, 0.5, 1.0, 1.0,
+            0.75, -0.75, 0.0, 0.0, 0.5, 0.5, 1.0, 1.0,
+        -0.75, 0.75, 0.0, 0.0, 0.75, 0.5, 1.0, 1.0,
+            0.75, 0.75, 0.0, 0.0, 0.75, 0.5, 1.0, 1.0]));
+
         const renderpassDescriptor: GPURenderPassDescriptor = {
             label: "render pass descriptor for basic.wgsl",
             colorAttachments: [{
-                clearValue: [Math.cos(this.totalTime) * 0.5 + 0.5, 0.2, 0.2, 1.0],
+                clearValue: [Math.cos(this.totalTime) * 0.5 + 0.5, 0.5, 0.5, 1.0],
                 loadOp: "clear",
                 storeOp: "store",
                 view: this.context.getCurrentTexture().createView(),
@@ -378,8 +537,10 @@ class Renderer {
         });
 
         const pass = encoder.beginRenderPass(renderpassDescriptor);
-        pass.setPipeline(this.basicPipeline);
-        pass.draw(3);
+        pass.setPipeline(this.basicPipeline as GPURenderPipeline);
+        pass.setBindGroup(0, this.bindGroup0);
+        pass.setIndexBuffer(this.indexBuffer as GPUBuffer, "uint16");
+        pass.drawIndexed(6, 4);
         pass.end();
 
         const commandBuffer = encoder.finish();
@@ -400,6 +561,7 @@ class Renderer {
 async function main() {
     try {
         const renderer = await Renderer.create(K90_CANVAS_DIV_ID);
+        await renderer.setup();
         renderer.render();
     }
     catch (ex) {
