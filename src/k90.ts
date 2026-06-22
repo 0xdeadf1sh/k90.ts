@@ -1,4 +1,13 @@
 ///////////////////////////////////////////////////////////////////////////
+//////////////////////////// 3RD PARTY LIBRARIES //////////////////////////
+///////////////////////////////////////////////////////////////////////////
+import { getWebGPUMemoryUsage } from "./webgpu-memory/webgpu-memory.js";
+import {
+    makeShaderDataDefinitions,
+    makeStructuredView,
+} from "webgpu-utils";
+
+///////////////////////////////////////////////////////////////////////////
 /////////////////////////////////// CONFIG ////////////////////////////////
 ///////////////////////////////////////////////////////////////////////////
 import packageJson from "../package.json";
@@ -33,6 +42,11 @@ class Util {
         const res = await fetch(url);
         const blob = await res.blob();
         return await createImageBitmap(blob, { colorSpaceConversion: "none" });
+    }
+
+    ///////////////////////////////////////////////////////////////////////////
+    public static bytesToMebi(bytes: number): number {
+        return bytes >> 20;
     }
 }
 
@@ -115,14 +129,19 @@ class Log {
 
 ///////////////////////////////////////////////////////////////////////////
 interface GeometryData {
-    vertices: Float32Array,
-    indices: Uint32Array,
+    vertices: Float16Array | Float32Array,
+    indices: Uint16Array | Uint32Array,
 }
 
 ///////////////////////////////////////////////////////////////////////////
+type GeometryPrecision = "half" | "full";
+
+///////////////////////////////////////////////////////////////////////////
 class Geometry {
-    public static genQuad(): GeometryData {
-        const vertices = new Float32Array([
+
+    ///////////////////////////////////////////////////////////////////////////
+    public static genQuad<T extends GeometryPrecision>(precision: T): GeometryData {
+        const vertices = new ((precision === "half") ? Float16Array : Float32Array)([
             -0.5, -0.5, 0.0, 1.0,       // position
             1.0, 0.0, 0.0, 1.0,         // color
             0.0, 1.0,                   // texcoord
@@ -148,7 +167,7 @@ class Geometry {
             0.0, 0.0,                   // padding
         ]);
 
-        const indices = new Uint32Array([
+        const indices = new ((precision === "half") ? Uint16Array : Uint32Array)([
             0, 1, 2,
             2, 1, 3,
         ]);
@@ -201,6 +220,7 @@ class DebugUI {
 
     ///////////////////////////////////////////////////////////////////////////
     public constructor(private readonly canvas: HTMLCanvasElement,
+        private readonly device: GPUDevice,
         private readonly delayMS: number) {
 
         const debugDiv = document.getElementById(K90_DEBUG_UI_FPS);
@@ -237,7 +257,7 @@ class DebugUI {
 
     ///////////////////////////////////////////////////////////////////////////
     private printResolution() {
-        this.debugDiv.innerHTML += `RES: ${this.canvas.width} x ${this.canvas.height}`;
+        this.debugDiv.innerHTML += `RES: ${this.canvas.width} x ${this.canvas.height}<br>`;
     }
 
     ///////////////////////////////////////////////////////////////////////////
@@ -245,6 +265,15 @@ class DebugUI {
         const avgRenderFPS = (this.totalRender / this.frameCount);
         this.debugDiv.innerHTML += `RENDER: ${avgRenderFPS.toFixed(2)} MS<br>`;
         this.totalRender = 0.0;
+    }
+
+    ///////////////////////////////////////////////////////////////////////////
+    private printMemoryUsage() {
+        const info = getWebGPUMemoryUsage(this.device);
+        this.debugDiv.innerHTML += `GPU TOTAL: ${(Util.bytesToMebi(info.memory.total)).toFixed(2)} MB (MAX: ${Util.bytesToMebi(info.memory.maxTotal)} MB)<br>`;
+        this.debugDiv.innerHTML += `GPU BUFFERS (${info.resources["buffer"]}): ${(Util.bytesToMebi(info.memory.buffer)).toFixed(2)} MB<br>`;
+        this.debugDiv.innerHTML += `GPU TEXTURES (${info.resources["texture"]}): ${(Util.bytesToMebi(info.memory.texture)).toFixed(2)} MB<br>`;
+        this.debugDiv.innerHTML += `GPU CANVAS (${info.resources["canvas"]}): ${(info.memory.canvas >> 20).toFixed(2)} MB<br>`
     }
 
     ///////////////////////////////////////////////////////////////////////////
@@ -258,9 +287,10 @@ class DebugUI {
             this.printAvgFPS();
             this.printAvgRenderFPS();
             this.printResolution();
+            this.printMemoryUsage();
 
             this.prevTime = now;
-            this.frameCount = 1;
+            this.frameCount = 0;
         }
     }
 
@@ -372,7 +402,16 @@ class Renderer {
         Log.info(`arch: ${adapter.info.architecture}`);
         Log.info(`vendor: ${adapter.info.vendor}`);
 
-        const device = await adapter.requestDevice({});
+        const device = await adapter.requestDevice({
+            requiredFeatures: [
+                "core-features-and-limits",
+                "depth32float-stencil8",
+                "float32-filterable",
+                "depth-clip-control",
+                "timestamp-query",
+                "shader-f16",
+            ]
+        });
         if (!device) {
             throw new Error("Failed to retrieve GPU device!");
         }
@@ -429,7 +468,7 @@ class Renderer {
         this.deltaTime = new DeltaTime();
         this.totalTime = 0.0;
 
-        this.debugUI = new DebugUI(this.canvas, 1000);
+        this.debugUI = new DebugUI(this.canvas, this.device, 1000);
 
         this.createResizeObserver();
     }
@@ -519,7 +558,7 @@ class Renderer {
 
     ///////////////////////////////////////////////////////////////////////////
     public async setup(): Promise<void> {
-        const quad = Geometry.genQuad();
+        const quad = Geometry.genQuad("half");
 
         this.indexBuffer = await this.createAndWriteBuffer({
             size: quad.indices.byteLength,
@@ -624,7 +663,7 @@ class Renderer {
         const pass = encoder.beginRenderPass(renderpassDescriptor);
         pass.setPipeline(this.basicPipeline as GPURenderPipeline);
         pass.setBindGroup(0, this.bindGroup0);
-        pass.setIndexBuffer(this.indexBuffer as GPUBuffer, "uint32");
+        pass.setIndexBuffer(this.indexBuffer as GPUBuffer, "uint16");
         pass.drawIndexed(6, 4);
         pass.end();
 

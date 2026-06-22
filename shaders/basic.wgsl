@@ -1,3 +1,5 @@
+enable f16;
+
 struct VertexInput {
     @builtin(vertex_index) vertexIndex: u32,
     @builtin(instance_index) instanceIndex: u32,
@@ -5,8 +7,8 @@ struct VertexInput {
 
 struct VertexOutput {
     @builtin(position) position: vec4f,
-    @location(0) color: vec4f,
-    @location(1) texcoord: vec2f,
+    @location(0) color: vec4<f16>,
+    @location(1) texcoord: vec2<f16>,
 }
 
 struct Transform {
@@ -15,9 +17,9 @@ struct Transform {
 }
 
 struct VertexData {
-    position: vec4f,
-    color: vec4f,
-    texcoord: vec2f,
+    position: vec4<f16>,
+    color: vec4<f16>,
+    texcoord: vec2<f16>,
 }
 
 @group(0) @binding(0) var<storage, read> vertexData: array<VertexData>;
@@ -34,7 +36,7 @@ fn vs(in: VertexInput) -> VertexOutput {
     let scale = transform[in.instanceIndex].scale;
 
     var out: VertexOutput;
-    out.position = scale * (vertexPosition + translation);
+    out.position = scale * (vec4f(vertexPosition) + translation);
     out.color = vertexColor;
     out.texcoord = texcoord;
 
@@ -51,6 +53,6 @@ struct FragmentOutput {
 @fragment
 fn fs(in: VertexOutput) -> FragmentOutput {
     var output: FragmentOutput;
-    output.canvas_output = in.color * textureSample(dogTexture, dogSampler, in.texcoord);
+    output.canvas_output = vec4f(in.color) * textureSample(dogTexture, dogSampler, vec2f(in.texcoord));
     return output;
 }
