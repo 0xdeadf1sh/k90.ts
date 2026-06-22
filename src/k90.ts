@@ -493,6 +493,31 @@ class Renderer {
     }
 
     ///////////////////////////////////////////////////////////////////////////
+    public async createShaderModule(desc: GPUShaderModuleDescriptor): Promise<GPUShaderModule> {
+        this.device.pushErrorScope("validation");
+        const module = this.device.createShaderModule(desc);
+        const err = await this.device.popErrorScope();
+        if (err) {
+            const info = await module.getCompilationInfo();
+            const lines = desc.code.split("\n");
+
+            const messages = [...info.messages].sort((a, b) => b.lineNum - a.lineNum);
+            for (const msg of messages) {
+                lines.splice(msg.lineNum, 0, `${''.padEnd(msg.linePos - 1)}${''.padEnd(msg.length, '^')}`,
+                    msg.message);
+            }
+
+            for (const line of lines) {
+                Log.error(line);
+            }
+
+            throw new Error(`Failed to compile shader '${desc.label}'!`);
+        }
+
+        return module;
+    }
+
+    ///////////////////////////////////////////////////////////////////////////
     public async setup(): Promise<void> {
         const quad = Geometry.genQuad();
 
@@ -511,7 +536,7 @@ class Renderer {
             usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
         });
 
-        const shaderModule = this.device.createShaderModule({
+        const shaderModule = await this.createShaderModule({
             code: wgslBasicCode,
             label: "basic.wgsl"
         });
@@ -582,6 +607,10 @@ class Renderer {
         -0.75, 0.75, 0.0, 0.0, 0.75, 0.5, 1.0, 1.0,
             0.75, 0.75, 0.0, 0.0, 0.75, 0.5, 1.0, 1.0]));
 
+        const encoder = this.device.createCommandEncoder({
+            label: "command encoder for basic.wgsl pipeline",
+        });
+
         const renderpassDescriptor: GPURenderPassDescriptor = {
             label: "render pass descriptor for basic.wgsl",
             colorAttachments: [{
@@ -591,10 +620,6 @@ class Renderer {
                 view: this.context.getCurrentTexture().createView(),
             }]
         };
-
-        const encoder = this.device.createCommandEncoder({
-            label: "command encoder for basic.wgsl pipeline",
-        });
 
         const pass = encoder.beginRenderPass(renderpassDescriptor);
         pass.setPipeline(this.basicPipeline as GPURenderPipeline);

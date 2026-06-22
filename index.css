@@ -26,11 +26,9 @@ div#k90-exception {
     background-color: black;
     color: red;
     display: none;
-    justify-content: center;
-    align-items: center;
     height: 100%;
-    width: 90%;
-    margin-left: 5%;
+    width: 100%;
+    overflow: scroll;
 }
 
 div#k90-logs {
