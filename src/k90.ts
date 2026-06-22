@@ -1,4 +1,11 @@
+///////////////////////////////////////////////////////////////////////////
+/////////////////////////////////// CONFIG ////////////////////////////////
+///////////////////////////////////////////////////////////////////////////
 import packageJson from "../package.json";
+
+///////////////////////////////////////////////////////////////////////////
+////////////////////////////////// SHADERS ////////////////////////////////
+///////////////////////////////////////////////////////////////////////////
 import wgslBasicCode from "../shaders/basic.wgsl?raw";
 
 ///////////////////////////////////////////////////////////////////////////
@@ -99,6 +106,57 @@ class Log {
             this.logDiv.innerHTML += `<span style='color: red;'>${this.date}: ${message}</span>`;
             this.logDiv.scrollTop = this.logDiv.scrollHeight;
         }
+    }
+}
+
+///////////////////////////////////////////////////////////////////////////
+///////////////////////////////// GEOMETRY ////////////////////////////////
+///////////////////////////////////////////////////////////////////////////
+
+///////////////////////////////////////////////////////////////////////////
+interface GeometryData {
+    vertices: Float32Array,
+    indices: Uint32Array,
+}
+
+///////////////////////////////////////////////////////////////////////////
+class Geometry {
+    public static genQuad(): GeometryData {
+        const vertices = new Float32Array([
+            -0.5, -0.5, 0.0, 1.0,       // position
+            1.0, 0.0, 0.0, 1.0,         // color
+            0.0, 1.0,                   // texcoord
+
+            0.0, 0.0,                   // padding
+
+            0.5, -0.5, 0.0, 1.0,        // position
+            0.0, 1.0, 0.0, 1.0,         // color
+            1.0, 1.0,                   // texcoord
+
+            0.0, 0.0,                   // padding
+
+            -0.5, 0.5, 0.0, 1.0,        // position
+            0.0, 0.0, 1.0, 1.0,         // color
+            0.0, 0.0,                   // texcoord
+
+            0.0, 0.0,                   // padding
+
+            0.5, 0.5, 0.0, 1.0,         // position
+            1.0, 1.0, 0.0, 1.0,         // color
+            1.0, 0.0,                   // texcoord
+
+            0.0, 0.0,                   // padding
+        ]);
+
+        const indices = new Uint32Array([
+            0, 1, 2,
+            2, 1, 3,
+        ]);
+
+        return {
+            vertices,
+            indices,
+        };
     }
 }
 
@@ -236,6 +294,11 @@ interface RendererConstructorParams {
     adapter: GPUAdapter;
     device: GPUDevice;
 }
+
+///////////////////////////////////////////////////////////////////////////
+////////////////////////////// RENDERER TYPES /////////////////////////////
+///////////////////////////////////////////////////////////////////////////
+type TypedArray = Uint16Array | Uint32Array | Float16Array | Float32Array;
 
 ///////////////////////////////////////////////////////////////////////////
 ///////////////////////////////// RENDERER ////////////////////////////////
@@ -402,51 +465,48 @@ class Renderer {
     }
 
     ///////////////////////////////////////////////////////////////////////////
+    public async createBuffer(desc: GPUBufferDescriptor): Promise<GPUBuffer> {
+        this.device.pushErrorScope("validation");
+        const buffer = this.device.createBuffer(desc);
+        const err = await this.device.popErrorScope();
+        if (err) {
+            throw new Error(err.message);
+        }
+        return buffer;
+    }
+
+    ///////////////////////////////////////////////////////////////////////////
+    public async writeBuffer(buffer: GPUBuffer, data: TypedArray, offset: number = 0): Promise<void> {
+        this.device.pushErrorScope("validation");
+        this.device.queue.writeBuffer(buffer, offset, data);
+        const err = await this.device.popErrorScope();
+        if (err) {
+            throw new Error(err.message);
+        }
+    }
+
+    ///////////////////////////////////////////////////////////////////////////
+    public async createAndWriteBuffer(desc: GPUBufferDescriptor, data: TypedArray, offset: number = 0): Promise<GPUBuffer> {
+        const buffer = await this.createBuffer(desc);
+        await this.writeBuffer(buffer, data, offset);
+        return buffer;
+    }
+
+    ///////////////////////////////////////////////////////////////////////////
     public async setup(): Promise<void> {
-        this.indexBuffer = this.device.createBuffer({
-            size: 6 * Uint16Array.BYTES_PER_ELEMENT,
+        const quad = Geometry.genQuad();
+
+        this.indexBuffer = await this.createAndWriteBuffer({
+            size: quad.indices.byteLength,
             usage: GPUBufferUsage.INDEX | GPUBufferUsage.COPY_DST,
-        });
+        }, quad.indices);
 
-        this.device.queue.writeBuffer(this.indexBuffer,
-            0,
-            new Uint16Array([0, 1, 2, 2, 1, 3]));
-
-        const vboData = new Float32Array([
-            -0.5, -0.5, 0.0, 1.0,
-            1.0, 0.0, 0.0, 1.0,
-            0.0, 1.0,
-
-            0.0, 0.0,
-
-            0.5, -0.5, 0.0, 1.0,
-            0.0, 1.0, 0.0, 1.0,
-            1.0, 1.0,
-
-            0.0, 0.0,
-
-            -0.5, 0.5, 0.0, 1.0,
-            0.0, 0.0, 1.0, 1.0,
-            0.0, 0.0,
-
-            0.0, 0.0,
-
-            0.5, 0.5, 0.0, 1.0,
-            1.0, 1.0, 0.0, 1.0,
-            1.0, 0.0,
-
-            0.0, 0.0,]);
-
-        this.vertexBuffer = this.device.createBuffer({
-            size: vboData.byteLength,
+        this.vertexBuffer = await this.createAndWriteBuffer({
+            size: quad.vertices.byteLength,
             usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
-        });
+        }, quad.vertices);
 
-        this.device.queue.writeBuffer(this.vertexBuffer,
-            0,
-            vboData);
-
-        this.transformBuffer = this.device.createBuffer({
+        this.transformBuffer = await this.createBuffer({
             size: 32 * Float32Array.BYTES_PER_ELEMENT,
             usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
         });
@@ -539,7 +599,7 @@ class Renderer {
         const pass = encoder.beginRenderPass(renderpassDescriptor);
         pass.setPipeline(this.basicPipeline as GPURenderPipeline);
         pass.setBindGroup(0, this.bindGroup0);
-        pass.setIndexBuffer(this.indexBuffer as GPUBuffer, "uint16");
+        pass.setIndexBuffer(this.indexBuffer as GPUBuffer, "uint32");
         pass.drawIndexed(6, 4);
         pass.end();
 
