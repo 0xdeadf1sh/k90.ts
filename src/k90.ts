@@ -2,10 +2,10 @@
 //////////////////////////// 3RD PARTY LIBRARIES //////////////////////////
 ///////////////////////////////////////////////////////////////////////////
 import { getWebGPUMemoryUsage } from "./webgpu-memory/webgpu-memory.js";
-import {
-    makeShaderDataDefinitions,
-    makeStructuredView,
-} from "webgpu-utils";
+// import {
+//     makeShaderDataDefinitions,
+//     makeStructuredView,
+// } from "webgpu-utils";
 
 ///////////////////////////////////////////////////////////////////////////
 /////////////////////////////////// CONFIG ////////////////////////////////
@@ -344,36 +344,9 @@ class Renderer {
     private readonly presentationFormat: GPUTextureFormat;
 
     ///////////////////////////////////////////////////////////////////////////
-    /////////////////////////////// PIPELINES /////////////////////////////////
-    ///////////////////////////////////////////////////////////////////////////
-    private basicPipeline: GPURenderPipeline | undefined;
-
-    ///////////////////////////////////////////////////////////////////////////
-    ////////////////////////////// BIND GROUPS ////////////////////////////////
-    ///////////////////////////////////////////////////////////////////////////
-    private bindGroup0: GPUBindGroup | undefined;
-
-    ///////////////////////////////////////////////////////////////////////////
-    //////////////////////////// STORAGE BUFFERS //////////////////////////////
-    ///////////////////////////////////////////////////////////////////////////
-    private vertexBuffer: GPUBuffer | undefined;
-    private transformBuffer: GPUBuffer | undefined;
-
-    ///////////////////////////////////////////////////////////////////////////
-    //////////////////////////// INDEX BUFFERS ////////////////////////////////
-    ///////////////////////////////////////////////////////////////////////////
-    private indexBuffer: GPUBuffer | undefined;
-
-    ///////////////////////////////////////////////////////////////////////////
-    /////////////////////////////// SAMPLERS //////////////////////////////////
-    ///////////////////////////////////////////////////////////////////////////
-    private sampler: GPUSampler | undefined;
-
-    ///////////////////////////////////////////////////////////////////////////
     ////////////////////////// PERFORMANCE METRICS ////////////////////////////
     ///////////////////////////////////////////////////////////////////////////
     private readonly deltaTime: DeltaTime;
-    private totalTime: number;
 
     ///////////////////////////////////////////////////////////////////////////
     //////////////////////////////// DEBUGGING ////////////////////////////////
@@ -466,10 +439,7 @@ class Renderer {
         Log.info(`canvas format: ${this.presentationFormat}`);
 
         this.deltaTime = new DeltaTime();
-        this.totalTime = 0.0;
-
         this.debugUI = new DebugUI(this.canvas, this.device, 1000);
-
         this.createResizeObserver();
     }
 
@@ -557,125 +527,123 @@ class Renderer {
     }
 
     ///////////////////////////////////////////////////////////////////////////
-    public async setup(): Promise<void> {
-        const quad = Geometry.genQuad("half");
+    public async createRenderPipeline(desc: GPURenderPipelineDescriptor): Promise<GPURenderPipeline> {
+        this.device.pushErrorScope("validation");
+        const pipeline = this.device.createRenderPipeline(desc);
+        const err = await this.device.popErrorScope();
+        if (err) {
+            throw new Error(err.message);
+        }
+        return pipeline;
+    }
 
-        this.indexBuffer = await this.createAndWriteBuffer({
-            size: quad.indices.byteLength,
-            usage: GPUBufferUsage.INDEX | GPUBufferUsage.COPY_DST,
-        }, quad.indices);
-
-        this.vertexBuffer = await this.createAndWriteBuffer({
-            size: quad.vertices.byteLength,
-            usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
-        }, quad.vertices);
-
-        this.transformBuffer = await this.createBuffer({
-            size: 32 * Float32Array.BYTES_PER_ELEMENT,
-            usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
-        });
-
-        const shaderModule = await this.createShaderModule({
-            code: wgslBasicCode,
-            label: "basic.wgsl"
-        });
-
-        this.basicPipeline = this.device.createRenderPipeline({
-            label: "basic.wgsl",
-            layout: "auto",
-            vertex: {
-                module: shaderModule,
-            },
-            fragment: {
-                module: shaderModule,
-                targets: [{ format: this.presentationFormat }]
-            }
-        });
-
-        const textureURL = "/assets/textures/kiana.png";
-        const textureData = await Util.loadImageBitmap(textureURL);
+    ///////////////////////////////////////////////////////////////////////////
+    public async createTextureFromBitmap(url: string, format: GPUTextureFormat): Promise<GPUTexture> {
+        const data = await Util.loadImageBitmap(url);
+        this.device.pushErrorScope("validation");
         const texture = this.device.createTexture({
-            label: textureURL,
-            format: "rgba8unorm-srgb",
-            size: [textureData.width, textureData.height, 1],
+            label: url,
+            format: format,
+            size: [data.width, data.height, 1,],
             usage: GPUTextureUsage.TEXTURE_BINDING |
                 GPUTextureUsage.COPY_DST |
                 GPUTextureUsage.RENDER_ATTACHMENT,
         });
 
+        const createTextureError = await this.device.popErrorScope();
+        if (createTextureError) {
+            throw new Error(createTextureError.message);
+        }
+
+        this.device.pushErrorScope("validation");
         this.device.queue.copyExternalImageToTexture({
-            source: textureData,
+            source: data,
             flipY: false,
         }, {
             texture: texture,
         }, {
-            width: textureData.width,
-            height: textureData.height,
+            width: data.width,
+            height: data.height,
         });
+        const copyImageErr = await this.device.popErrorScope();
+        if (copyImageErr) {
+            throw new Error(copyImageErr.message);
+        }
 
-        this.sampler = this.device.createSampler({
-            addressModeU: "repeat",
-            addressModeV: "repeat",
-            addressModeW: "repeat",
-            minFilter: "linear",
-            magFilter: "linear",
-            mipmapFilter: "linear",
-            maxAnisotropy: 4,
+        return texture;
+    }
+
+    ///////////////////////////////////////////////////////////////////////////
+    public async createSampler(desc: GPUSamplerDescriptor): Promise<GPUSampler> {
+        this.device.pushErrorScope("validation");
+        const sampler = this.device.createSampler(desc);
+        const err = await this.device.popErrorScope();
+        if (err) {
+            throw new Error(err.message);
+        }
+        return sampler;
+    }
+
+    ///////////////////////////////////////////////////////////////////////////
+    public async createBindGroup(desc: GPUBindGroupDescriptor): Promise<GPUBindGroup> {
+        this.device.pushErrorScope("validation");
+        const bindGroup = this.device.createBindGroup(desc);
+        const err = await this.device.popErrorScope();
+        if (err) {
+            throw new Error(err.message);
+        }
+        return bindGroup;
+    }
+
+    ///////////////////////////////////////////////////////////////////////////
+    public createCmdEncoder(desc: GPUCommandEncoderDescriptor): GPUCommandEncoder {
+        this.device.pushErrorScope("validation");
+        const encoder = this.device.createCommandEncoder(desc);
+        this.device.popErrorScope().then(info => {
+            if (info) {
+                Log.error(info.message);
+            }
         });
+        return encoder;
+    }
 
-        this.bindGroup0 = this.device.createBindGroup({
-            layout: this.basicPipeline.getBindGroupLayout(0),
-            entries: [
-                { binding: 0, resource: this.vertexBuffer },
-                { binding: 1, resource: this.transformBuffer },
-                { binding: 2, resource: this.sampler },
-                { binding: 3, resource: texture },
-            ]
+    ///////////////////////////////////////////////////////////////////////////
+    public submitCmdBuffers(buffers: Array<GPUCommandBuffer>): void {
+        this.device.pushErrorScope("validation");
+        this.device.queue.submit(buffers);
+        this.device.popErrorScope().then(info => {
+            if (info) {
+                Log.error(info.message);
+            }
         });
     }
 
     ///////////////////////////////////////////////////////////////////////////
-    public render(): void {
-        this.debugUI.beginRender();
+    public createViewForCurrentTexture(): GPUTextureView {
+        return this.context.getCurrentTexture().createView();
+    }
+
+    ///////////////////////////////////////////////////////////////////////////
+    public render(callback: (dt: number) => void, enableDebugUI: boolean = true): void {
+        if (enableDebugUI) {
+            this.debugUI.beginRender();
+        }
 
         const dt = this.deltaTime.dt();
-        this.totalTime += dt * 1e-3;
+        callback(dt);
 
-        this.device.queue.writeBuffer(this.transformBuffer as GPUBuffer, 0, new Float32Array([-0.75, -0.75, 0.0, 0.0, 0.5, 0.5, 1.0, 1.0,
-            0.75, -0.75, 0.0, 0.0, 0.5, 0.5, 1.0, 1.0,
-        -0.75, 0.75, 0.0, 0.0, 0.75, 0.5, 1.0, 1.0,
-            0.75, 0.75, 0.0, 0.0, 0.75, 0.5, 1.0, 1.0]));
+        if (enableDebugUI) {
+            this.debugUI.endRender();
+            this.debugUI.writeDT(dt);
+            this.debugUI.update();
+        }
 
-        const encoder = this.device.createCommandEncoder({
-            label: "command encoder for basic.wgsl pipeline",
-        });
+        requestAnimationFrame(() => this.render(callback, enableDebugUI));
+    }
 
-        const renderpassDescriptor: GPURenderPassDescriptor = {
-            label: "render pass descriptor for basic.wgsl",
-            colorAttachments: [{
-                clearValue: [Math.cos(this.totalTime) * 0.5 + 0.5, 0.5, 0.5, 1.0],
-                loadOp: "clear",
-                storeOp: "store",
-                view: this.context.getCurrentTexture().createView(),
-            }]
-        };
-
-        const pass = encoder.beginRenderPass(renderpassDescriptor);
-        pass.setPipeline(this.basicPipeline as GPURenderPipeline);
-        pass.setBindGroup(0, this.bindGroup0);
-        pass.setIndexBuffer(this.indexBuffer as GPUBuffer, "uint16");
-        pass.drawIndexed(6, 4);
-        pass.end();
-
-        const commandBuffer = encoder.finish();
-        this.device.queue.submit([commandBuffer]);
-
-        this.debugUI.endRender();
-
-        this.debugUI.writeDT(dt);
-        this.debugUI.update();
-
-        requestAnimationFrame(() => this.render());
+    ///////////////////////////////////////////////////////////////////////////
+    public getPresentationFormat(): GPUTextureFormat {
+        return this.presentationFormat;
     }
 }
 
@@ -685,8 +653,101 @@ class Renderer {
 async function main() {
     try {
         const renderer = await Renderer.create(K90_CANVAS_DIV_ID);
-        await renderer.setup();
-        renderer.render();
+
+        const quad = Geometry.genQuad("half");
+
+        const indexBuffer = await renderer.createAndWriteBuffer({
+            size: quad.indices.byteLength,
+            usage: GPUBufferUsage.INDEX | GPUBufferUsage.COPY_DST,
+        }, quad.indices);
+
+        const vertexBuffer = await renderer.createAndWriteBuffer({
+            size: quad.vertices.byteLength,
+            usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
+        }, quad.vertices);
+
+        const transformBuffer = await renderer.createBuffer({
+            size: 32 * Float32Array.BYTES_PER_ELEMENT,
+            usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
+        });
+
+        const shaderModule = await renderer.createShaderModule({
+            code: wgslBasicCode,
+            label: "basic.wgsl"
+        });
+
+        const basicPipeline = await renderer.createRenderPipeline({
+            label: "basic.wgsl",
+            layout: "auto",
+            vertex: {
+                module: shaderModule,
+            },
+            fragment: {
+                module: shaderModule,
+                targets: [{ format: renderer.getPresentationFormat() }]
+            }
+        });
+
+        const texture = await renderer.createTextureFromBitmap(
+            "/assets/textures/kiana.png",
+            "rgba8unorm-srgb",
+        );
+
+        const sampler = await renderer.createSampler({
+            addressModeU: "repeat",
+            addressModeV: "repeat",
+            addressModeW: "repeat",
+            minFilter: "linear",
+            magFilter: "linear",
+            mipmapFilter: "linear",
+            maxAnisotropy: 4,
+        });
+
+        const bindGroup0 = await renderer.createBindGroup({
+            layout: basicPipeline.getBindGroupLayout(0),
+            entries: [
+                { binding: 0, resource: vertexBuffer },
+                { binding: 1, resource: transformBuffer },
+                { binding: 2, resource: sampler },
+                { binding: 3, resource: texture },
+            ]
+        });
+
+        let totalTime: number = 0;
+
+        renderer.render(async (dt: number) => {
+
+            totalTime += dt * 1e-3;
+
+            await renderer.writeBuffer(transformBuffer, new Float32Array([-0.75, -0.75, 0.0, 0.0, 0.5, 0.5, 1.0, 1.0,
+                0.75, -0.75, 0.0, 0.0, 0.5, 0.5, 1.0, 1.0,
+            -0.75, 0.75, 0.0, 0.0, 0.75, 0.5, 1.0, 1.0,
+                0.75, 0.75, 0.0, 0.0, 0.75, 0.5, 1.0, 1.0]));
+
+            const renderpassDescriptor: GPURenderPassDescriptor = {
+                label: "render pass descriptor for basic.wgsl",
+                colorAttachments: [{
+                    clearValue: [Math.cos(totalTime) * 0.5 + 0.5, 0.5, 0.5, 1.0],
+                    loadOp: "clear",
+                    storeOp: "store",
+                    view: renderer.createViewForCurrentTexture(),
+                }]
+            };
+
+            const cmdEncoder = renderer.createCmdEncoder({
+                label: "basic.wgsl pipeline",
+            });
+
+            const pass = cmdEncoder.beginRenderPass(renderpassDescriptor);
+            pass.setPipeline(basicPipeline);
+            pass.setBindGroup(0, bindGroup0);
+            pass.setIndexBuffer(indexBuffer, "uint16");
+            pass.drawIndexed(6, 4);
+            pass.end();
+
+            const commandBuffer = cmdEncoder.finish();
+            renderer.submitCmdBuffers([commandBuffer]);
+        });
     }
     catch (ex) {
         printException(ex);

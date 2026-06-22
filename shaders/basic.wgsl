@@ -7,8 +7,8 @@ struct VertexInput {
 
 struct VertexOutput {
     @builtin(position) position: vec4f,
-    @location(0) color: vec4<f16>,
-    @location(1) texcoord: vec2<f16>,
+    @location(0) color: vec4h,
+    @location(1) texcoord: vec2h,
 }
 
 struct Transform {
@@ -17,9 +17,9 @@ struct Transform {
 }
 
 struct VertexData {
-    position: vec4<f16>,
-    color: vec4<f16>,
-    texcoord: vec2<f16>,
+    position: vec4h,
+    color: vec4h,
+    texcoord: vec2h,
 }
 
 @group(0) @binding(0) var<storage, read> vertexData: array<VertexData>;
