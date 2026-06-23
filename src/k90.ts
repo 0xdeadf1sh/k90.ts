@@ -2,10 +2,11 @@
 //////////////////////////// 3RD PARTY LIBRARIES //////////////////////////
 ///////////////////////////////////////////////////////////////////////////
 import { getWebGPUMemoryUsage } from "./webgpu-memory/webgpu-memory.js";
-// import {
-//     makeShaderDataDefinitions,
-//     makeStructuredView,
-// } from "webgpu-utils";
+import {
+    makeShaderDataDefinitions,
+    makeStructuredView,
+    getSizeAndAlignmentOfUnsizedArrayElement
+} from "webgpu-utils";
 
 ///////////////////////////////////////////////////////////////////////////
 /////////////////////////////////// CONFIG ////////////////////////////////
@@ -243,13 +244,13 @@ class DebugUI {
         const avgFPS = this.totalFPS / this.frameCount;
 
         if (avgFPS >= K90_RECOMMENDED_MIN_FPS) {
-            this.debugDiv.innerHTML += `<span style='color: #00ff00;'>FPS: ${avgFPS.toFixed(2)}</span><br>`;
+            this.debugDiv.innerHTML += `<span style='color: #00ff00;'>FPS: ${avgFPS.toFixed(2)}</span> | `;
         }
         else if (avgFPS >= K90_WARNING_MIN_FPS) {
-            this.debugDiv.innerHTML += `<span style='color: #ffff00;'>FPS: ${avgFPS.toFixed(2)}</span><br>`;
+            this.debugDiv.innerHTML += `<span style='color: #ffff00;'>FPS: ${avgFPS.toFixed(2)}</span> | `;
         }
         else {
-            this.debugDiv.innerHTML += `<span style='color: #ff0000;'>FPS: ${avgFPS.toFixed(2)}</span><br>`;
+            this.debugDiv.innerHTML += `<span style='color: #ff0000;'>FPS: ${avgFPS.toFixed(2)}</span> | `;
         }
 
         this.totalFPS = 0.0;
@@ -257,13 +258,13 @@ class DebugUI {
 
     ///////////////////////////////////////////////////////////////////////////
     private printResolution() {
-        this.debugDiv.innerHTML += `RES: ${this.canvas.width} x ${this.canvas.height}<br>`;
+        this.debugDiv.innerHTML += `RES: ${this.canvas.width}x${this.canvas.height}<br>`;
     }
 
     ///////////////////////////////////////////////////////////////////////////
     private printAvgRenderFPS() {
         const avgRenderFPS = (this.totalRender / this.frameCount);
-        this.debugDiv.innerHTML += `RENDER: ${avgRenderFPS.toFixed(2)} MS<br>`;
+        this.debugDiv.innerHTML += `RENDER: ${avgRenderFPS.toFixed(2)} MS | `;
         this.totalRender = 0.0;
     }
 
@@ -328,7 +329,7 @@ interface RendererConstructorParams {
 ///////////////////////////////////////////////////////////////////////////
 ////////////////////////////// RENDERER TYPES /////////////////////////////
 ///////////////////////////////////////////////////////////////////////////
-type TypedArray = Uint16Array | Uint32Array | Float16Array | Float32Array;
+type TypedArray = Uint16Array | Uint32Array | Float16Array | Float32Array | ArrayBuffer;
 
 ///////////////////////////////////////////////////////////////////////////
 ///////////////////////////////// RENDERER ////////////////////////////////
@@ -540,11 +541,14 @@ class Renderer {
     ///////////////////////////////////////////////////////////////////////////
     public async createTextureFromBitmap(url: string, format: GPUTextureFormat): Promise<GPUTexture> {
         const data = await Util.loadImageBitmap(url);
+        const mipLevelCount = Math.floor(Math.log2(Math.max(data.width, data.height))) + 1;
+
         this.device.pushErrorScope("validation");
         const texture = this.device.createTexture({
             label: url,
             format: format,
-            size: [data.width, data.height, 1,],
+            mipLevelCount: mipLevelCount,
+            size: [data.width, data.height, 1],
             usage: GPUTextureUsage.TEXTURE_BINDING |
                 GPUTextureUsage.COPY_DST |
                 GPUTextureUsage.RENDER_ATTACHMENT,
@@ -561,13 +565,61 @@ class Renderer {
             flipY: false,
         }, {
             texture: texture,
+            mipLevel: 0,
         }, {
             width: data.width,
             height: data.height,
         });
+
         const copyImageErr = await this.device.popErrorScope();
         if (copyImageErr) {
             throw new Error(copyImageErr.message);
+        }
+
+        Log.info(`Loaded ${url} into mip level 0`);
+
+        const imageUrls: Array<string> = [];
+        const suffixInd = url.lastIndexOf(".");
+        const baseUrl = url.slice(0, suffixInd);
+        const suffix = url.slice(suffixInd);
+
+        for (let i = 1; i < mipLevelCount; ++i) {
+            const newWidth = Math.max(data.width >> i, 1);
+            const newHeight = Math.max(data.height >> i, 1);
+            imageUrls.push(`${baseUrl}_${newWidth}x${newHeight}${suffix}`);
+        }
+
+        const mipImagePromises = imageUrls.map(imageUrl => Util.loadImageBitmap(imageUrl));
+        const loadedMipmaps = await Promise.allSettled(mipImagePromises);
+
+        for (let i = 0; i < loadedMipmaps.length; i++) {
+            const result = loadedMipmaps[i];
+
+            if (!result || result.status === "rejected") {
+                throw new Error(`Failed to load '${imageUrls[i]}': ${result?.reason}`);
+            }
+
+            const mipData = result.value;
+            const mipLevel = i + 1;
+
+            this.device.pushErrorScope("validation");
+            this.device.queue.copyExternalImageToTexture({
+                source: mipData,
+                flipY: false,
+            }, {
+                texture: texture,
+                mipLevel: mipLevel,
+            }, {
+                width: mipData.width,
+                height: mipData.height,
+            });
+
+            const mipErr = await this.device.popErrorScope();
+            if (mipErr) {
+                throw new Error(`Failed to copy to mip level ${mipLevel} from ${imageUrls[i]}: ${mipErr.message}`);
+            }
+
+            Log.info(`Loaded ${imageUrls[i]} into mip level ${mipLevel}`);
         }
 
         return texture;
@@ -689,7 +741,7 @@ async function main() {
         });
 
         const texture = await renderer.createTextureFromBitmap(
-            "/assets/textures/kiana.png",
+            "/assets/textures/kiana/kiana.png",
             "rgba8unorm-srgb",
         );
 
@@ -715,14 +767,37 @@ async function main() {
 
         let totalTime: number = 0;
 
+        const basicWgslDefs = makeShaderDataDefinitions(wgslBasicCode);
+        if (!basicWgslDefs.storages["transform"]) {
+            throw new Error("No uniforms found in basic.wgsl");
+        }
+
+        const variableDef = basicWgslDefs.storages["transform"];
+        const elemCount = 4;
+        const { size } = getSizeAndAlignmentOfUnsizedArrayElement(variableDef);
+        const totalBytes = size * elemCount;
+
+        const transformValues = makeStructuredView(basicWgslDefs.storages["transform"], new ArrayBuffer(totalBytes));
+
         renderer.render(async (dt: number) => {
 
             totalTime += dt * 1e-3;
 
-            await renderer.writeBuffer(transformBuffer, new Float32Array([-0.75, -0.75, 0.0, 0.0, 0.5, 0.5, 1.0, 1.0,
-                0.75, -0.75, 0.0, 0.0, 0.5, 0.5, 1.0, 1.0,
-            -0.75, 0.75, 0.0, 0.0, 0.75, 0.5, 1.0, 1.0,
-                0.75, 0.75, 0.0, 0.0, 0.75, 0.5, 1.0, 1.0]));
+            transformValues.set([{
+                translation: [-0.75, -0.75, 0.0, 0.0],
+                scale: [0.5, 0.5, 1.0, 1.0,],
+            }, {
+                translation: [0.75, -0.75, 0.0, 0.0],
+                scale: [0.5, 0.5, 1.0, 1.0,],
+            }, {
+                translation: [-0.75, 0.75, 0.0, 0.0],
+                scale: [0.75, 0.75, 1.0, 1.0,],
+            }, {
+                translation: [0.75, 0.75, 0.0, 0.0],
+                scale: [0.75, 0.75, 1.0, 1.0,],
+            }]);
+
+            await renderer.writeBuffer(transformBuffer, transformValues.arrayBuffer);
 
             const renderpassDescriptor: GPURenderPassDescriptor = {
                 label: "render pass descriptor for basic.wgsl",
