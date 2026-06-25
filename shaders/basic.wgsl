@@ -22,8 +22,16 @@ struct VertexData {
     texcoord: vec2h,
 }
 
+struct ImTest {
+    offset: vec4f,
+}
+
 @group(0) @binding(0) var<storage, read> vertexData: array<VertexData>;
 @group(0) @binding(1) var<storage, read> transform: array<Transform>;
+
+var<immediate> imtest: ImTest;
+
+override applyScale: bool;
 
 @vertex
 fn vs(in: VertexInput) -> VertexOutput {
@@ -36,7 +44,12 @@ fn vs(in: VertexInput) -> VertexOutput {
     let scale = transform[in.instanceIndex].scale;
 
     var out: VertexOutput;
-    out.position = scale * (vec4f(vertexPosition) + translation);
+    out.position = (vec4f(vertexPosition) + translation + imtest.offset);
+
+    if applyScale {
+        out.position *= scale;
+    }
+
     out.color = vertexColor;
     out.texcoord = texcoord;
 
@@ -54,5 +67,6 @@ struct FragmentOutput {
 fn fs(in: VertexOutput) -> FragmentOutput {
     var output: FragmentOutput;
     output.canvas_output = vec4f(in.color) * textureSample(dogTexture, dogSampler, vec2f(in.texcoord));
+    output.canvas_output = pow(output.canvas_output, vec4(1.0 / 2.2));
     return output;
 }

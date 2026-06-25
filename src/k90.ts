@@ -1,12 +1,8 @@
 ///////////////////////////////////////////////////////////////////////////
 //////////////////////////// 3RD PARTY LIBRARIES //////////////////////////
 ///////////////////////////////////////////////////////////////////////////
-import { getWebGPUMemoryUsage } from "./webgpu-memory/webgpu-memory.js";
-import {
-    makeShaderDataDefinitions,
-    makeStructuredView,
-    getSizeAndAlignmentOfUnsizedArrayElement
-} from "webgpu-utils";
+import * as webgpuMemory from "./webgpu-memory/webgpu-memory.js";
+import * as webgpuUtils from "webgpu-utils";
 
 ///////////////////////////////////////////////////////////////////////////
 /////////////////////////////////// CONFIG ////////////////////////////////
@@ -270,7 +266,7 @@ class DebugUI {
 
     ///////////////////////////////////////////////////////////////////////////
     private printMemoryUsage() {
-        const info = getWebGPUMemoryUsage(this.device);
+        const info = webgpuMemory.getWebGPUMemoryUsage(this.device);
         this.debugDiv.innerHTML += `GPU TOTAL: ${(Util.bytesToMebi(info.memory.total)).toFixed(2)} MB (MAX: ${Util.bytesToMebi(info.memory.maxTotal)} MB)<br>`;
         this.debugDiv.innerHTML += `GPU BUFFERS (${info.resources["buffer"]}): ${(Util.bytesToMebi(info.memory.buffer)).toFixed(2)} MB<br>`;
         this.debugDiv.innerHTML += `GPU TEXTURES (${info.resources["texture"]}): ${(Util.bytesToMebi(info.memory.texture)).toFixed(2)} MB<br>`;
@@ -360,6 +356,10 @@ class Renderer {
     public static async create(canvasId: string): Promise<Renderer> {
         if (!navigator.gpu) {
             throw new Error("WebGPU is not supported!");
+        }
+
+        if (!navigator.gpu.wgslLanguageFeatures.has("immediate_address_space")) {
+            throw new Error("This WebGPU implementation has no support for immediates!");
         }
 
         const adapterOptions: GPURequestAdapterOptions = {
@@ -459,8 +459,8 @@ class Renderer {
                     height = Math.floor(this.canvas.clientHeight * devicePixelRatio);
                 }
 
-                width = Util.clamp(width, 1, this.device.limits.maxTextureDimension2D);
-                height = Util.clamp(height, 1, this.device.limits.maxTextureDimension2D);
+                width = Util.clamp(width, 1, this.maxTextureDimension2D());
+                height = Util.clamp(height, 1, this.maxTextureDimension2D());
 
                 if (this.canvas.width !== width || this.canvas.height !== height) {
                     Log.info(`Resizing from ${this.canvas.width} x ${this.canvas.height} to ${width} x ${height}`);
@@ -539,8 +539,24 @@ class Renderer {
     }
 
     ///////////////////////////////////////////////////////////////////////////
+    public async createPipelineLayout(desc: GPUPipelineLayoutDescriptor): Promise<GPUPipelineLayout> {
+        this.device.pushErrorScope("validation");
+        const layout = this.device.createPipelineLayout(desc);
+        const err = await this.device.popErrorScope();
+        if (err) {
+            throw new Error(err.message);
+        }
+        return layout;
+    }
+
+    ///////////////////////////////////////////////////////////////////////////
     public async createTextureFromBitmap(url: string, format: GPUTextureFormat): Promise<GPUTexture> {
         const data = await Util.loadImageBitmap(url);
+
+        if (data.width > this.maxTextureDimension2D() || data.height > this.maxTextureDimension2D()) {
+            throw new Error(`${url} is too large for the GPU!`);
+        }
+
         const mipLevelCount = Math.floor(Math.log2(Math.max(data.width, data.height))) + 1;
 
         this.device.pushErrorScope("validation");
@@ -648,6 +664,17 @@ class Renderer {
     }
 
     ///////////////////////////////////////////////////////////////////////////
+    public async createBindGroupLayout(desc: GPUBindGroupLayoutDescriptor): Promise<GPUBindGroupLayout> {
+        this.device.pushErrorScope("validation");
+        const bindGroupLayout = this.device.createBindGroupLayout(desc);
+        const err = await this.device.popErrorScope();
+        if (err) {
+            throw new Error(err.message);
+        }
+        return bindGroupLayout;
+    }
+
+    ///////////////////////////////////////////////////////////////////////////
     public createCmdEncoder(desc: GPUCommandEncoderDescriptor): GPUCommandEncoder {
         this.device.pushErrorScope("validation");
         const encoder = this.device.createCommandEncoder(desc);
@@ -697,6 +724,11 @@ class Renderer {
     public getPresentationFormat(): GPUTextureFormat {
         return this.presentationFormat;
     }
+
+    ///////////////////////////////////////////////////////////////////////////
+    public maxTextureDimension2D(): number {
+        return this.device.limits.maxTextureDimension2D;
+    }
 }
 
 ///////////////////////////////////////////////////////////////////////////
@@ -709,43 +741,47 @@ async function main() {
         const quad = Geometry.genQuad("half");
 
         const indexBuffer = await renderer.createAndWriteBuffer({
+            label: "Index Buffer",
             size: quad.indices.byteLength,
             usage: GPUBufferUsage.INDEX | GPUBufferUsage.COPY_DST,
         }, quad.indices);
 
         const vertexBuffer = await renderer.createAndWriteBuffer({
+            label: "Vertex Buffer",
             size: quad.vertices.byteLength,
             usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
         }, quad.vertices);
 
+        const basicWgslDefs = webgpuUtils.makeShaderDataDefinitions(wgslBasicCode);
+        if (!basicWgslDefs.storages["transform"]) {
+            throw new Error("No uniforms found in basic.wgsl");
+        }
+
+        const variableDef = basicWgslDefs.storages["transform"];
+        const elemCount = 4;
+        const { size } = webgpuUtils.getSizeAndAlignmentOfUnsizedArrayElement(variableDef);
+        const totalBytes = size * elemCount;
+
+        const transformValues = webgpuUtils.makeStructuredView(basicWgslDefs.storages["transform"], new ArrayBuffer(totalBytes));
+
         const transformBuffer = await renderer.createBuffer({
-            size: 32 * Float32Array.BYTES_PER_ELEMENT,
+            label: "Transform Buffer",
+            size: totalBytes,
             usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
         });
 
         const shaderModule = await renderer.createShaderModule({
-            code: wgslBasicCode,
-            label: "basic.wgsl"
-        });
-
-        const basicPipeline = await renderer.createRenderPipeline({
             label: "basic.wgsl",
-            layout: "auto",
-            vertex: {
-                module: shaderModule,
-            },
-            fragment: {
-                module: shaderModule,
-                targets: [{ format: renderer.getPresentationFormat() }]
-            }
+            code: wgslBasicCode,
         });
 
         const texture = await renderer.createTextureFromBitmap(
-            "/assets/textures/kiana/kiana.png",
+            "/assets/textures/cat/cat.jpg",
             "rgba8unorm-srgb",
         );
 
         const sampler = await renderer.createSampler({
+            label: "Dog Sampler",
             addressModeU: "repeat",
             addressModeV: "repeat",
             addressModeW: "repeat",
@@ -755,8 +791,27 @@ async function main() {
             maxAnisotropy: 4,
         });
 
+        const bindGroup0Layout = await renderer.createBindGroupLayout({
+            entries: [
+                {
+                    binding: 0, visibility: GPUShaderStage.VERTEX, buffer: {
+                        type: "read-only-storage",
+                        minBindingSize: quad.vertices.byteLength,
+                    }
+                },
+                {
+                    binding: 1, visibility: GPUShaderStage.VERTEX, buffer: {
+                        type: "read-only-storage",
+                        minBindingSize: totalBytes,
+                    }
+                },
+                { binding: 2, visibility: GPUShaderStage.FRAGMENT, sampler: {} },
+                { binding: 3, visibility: GPUShaderStage.FRAGMENT, texture: {} },
+            ]
+        });
+
         const bindGroup0 = await renderer.createBindGroup({
-            layout: basicPipeline.getBindGroupLayout(0),
+            layout: bindGroup0Layout,
             entries: [
                 { binding: 0, resource: vertexBuffer },
                 { binding: 1, resource: transformBuffer },
@@ -765,19 +820,29 @@ async function main() {
             ]
         });
 
+        const pipelineLayout = await renderer.createPipelineLayout({
+            bindGroupLayouts: [
+                bindGroup0Layout,
+            ],
+            immediateSize: 64,
+        });
+
+        const basicPipeline = await renderer.createRenderPipeline({
+            label: "basic.wgsl",
+            layout: pipelineLayout,
+            vertex: {
+                module: shaderModule,
+                constants: {
+                    applyScale: 1,
+                }
+            },
+            fragment: {
+                module: shaderModule,
+                targets: [{ format: renderer.getPresentationFormat() }]
+            }
+        });
+
         let totalTime: number = 0;
-
-        const basicWgslDefs = makeShaderDataDefinitions(wgslBasicCode);
-        if (!basicWgslDefs.storages["transform"]) {
-            throw new Error("No uniforms found in basic.wgsl");
-        }
-
-        const variableDef = basicWgslDefs.storages["transform"];
-        const elemCount = 4;
-        const { size } = getSizeAndAlignmentOfUnsizedArrayElement(variableDef);
-        const totalBytes = size * elemCount;
-
-        const transformValues = makeStructuredView(basicWgslDefs.storages["transform"], new ArrayBuffer(totalBytes));
 
         renderer.render(async (dt: number) => {
 
@@ -817,6 +882,7 @@ async function main() {
             pass.setPipeline(basicPipeline);
             pass.setBindGroup(0, bindGroup0);
             pass.setIndexBuffer(indexBuffer, "uint16");
+            pass.setImmediates(0, new Float32Array([0.0, 0.0, 0.0, 0.0]));
             pass.drawIndexed(6, 4);
             pass.end();
 
