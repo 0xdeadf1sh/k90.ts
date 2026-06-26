@@ -199,6 +199,69 @@ class DeltaTime {
 }
 
 ///////////////////////////////////////////////////////////////////////////
+////////////////////////////////// QUERIES ////////////////////////////////
+///////////////////////////////////////////////////////////////////////////
+class TimestampQuery {
+
+    ///////////////////////////////////////////////////////////////////////////
+    private constructor(private readonly querySet: GPUQuerySet,
+        private readonly resolveBuffer: GPUBuffer,
+        private readonly readBuffer: GPUBuffer) { }
+
+    ///////////////////////////////////////////////////////////////////////////
+    public static async create(renderer: Renderer): Promise<TimestampQuery> {
+        const querySet = await renderer.createQuerySet({
+            count: 2,
+            type: "timestamp",
+        });
+
+        const resolveBuffer = await renderer.createBuffer({
+            size: querySet.count * BigUint64Array.BYTES_PER_ELEMENT,
+            usage: GPUBufferUsage.QUERY_RESOLVE | GPUBufferUsage.COPY_SRC,
+        });
+
+        const readBuffer = await renderer.createBuffer({
+            size: resolveBuffer.size,
+            usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ,
+        });
+
+        return new TimestampQuery(querySet, resolveBuffer, readBuffer);
+    }
+
+    ///////////////////////////////////////////////////////////////////////////
+    public getTimestampWritesForRenderpass(): GPURenderPassTimestampWrites {
+        return {
+            querySet: this.querySet,
+            beginningOfPassWriteIndex: 0,
+            endOfPassWriteIndex: 1,
+        };
+    }
+
+    ///////////////////////////////////////////////////////////////////////////
+    public resolve(encoder: GPUCommandEncoder) {
+        encoder.resolveQuerySet(this.querySet, 0, this.querySet.count, this.resolveBuffer, 0);
+        if (this.readBuffer.mapState === "unmapped") {
+            encoder.copyBufferToBuffer(this.resolveBuffer, 0, this.readBuffer, 0, this.readBuffer.size);
+        }
+    }
+
+    ///////////////////////////////////////////////////////////////////////////
+    public async getTimePassed(): Promise<number> {
+        if (this.readBuffer.mapState === "unmapped") {
+            await this.readBuffer.mapAsync(GPUMapMode.READ);
+            const times = new BigUint64Array(this.readBuffer.getMappedRange());
+            if (times[0] && times[1]) {
+                const result = Number(times[1] - times[0]);
+                this.readBuffer.unmap();
+                return result * 1e-6;
+            }
+            this.readBuffer.unmap();
+        }
+        return 0.0;
+    }
+}
+
+///////////////////////////////////////////////////////////////////////////
 ////////////////////////// PERFORMANCE ELEMENTS ///////////////////////////
 ///////////////////////////////////////////////////////////////////////////
 class DebugUI {
@@ -216,6 +279,9 @@ class DebugUI {
     private totalRender: number;
 
     ///////////////////////////////////////////////////////////////////////////
+    private totalRenderpassMS: number;
+
+    ///////////////////////////////////////////////////////////////////////////
     public constructor(private readonly canvas: HTMLCanvasElement,
         private readonly device: GPUDevice,
         private readonly delayMS: number) {
@@ -231,6 +297,8 @@ class DebugUI {
 
         this.prevRender = 0;
         this.totalRender = 0;
+
+        this.totalRenderpassMS = 0;
 
         this.debugDiv = debugDiv as HTMLDivElement;
     }
@@ -260,7 +328,7 @@ class DebugUI {
     ///////////////////////////////////////////////////////////////////////////
     private printAvgRenderFPS() {
         const avgRenderFPS = (this.totalRender / this.frameCount);
-        this.debugDiv.innerHTML += `RENDER: ${avgRenderFPS.toFixed(2)} MS | `;
+        this.debugDiv.innerHTML += `JS: ${avgRenderFPS.toFixed(2)} MS | `;
         this.totalRender = 0.0;
     }
 
@@ -271,6 +339,13 @@ class DebugUI {
         this.debugDiv.innerHTML += `GPU BUFFERS (${info.resources["buffer"]}): ${(Util.bytesToMebi(info.memory.buffer)).toFixed(2)} MB<br>`;
         this.debugDiv.innerHTML += `GPU TEXTURES (${info.resources["texture"]}): ${(Util.bytesToMebi(info.memory.texture)).toFixed(2)} MB<br>`;
         this.debugDiv.innerHTML += `GPU CANVAS (${info.resources["canvas"]}): ${(info.memory.canvas >> 20).toFixed(2)} MB<br>`
+    }
+
+    ///////////////////////////////////////////////////////////////////////////
+    private printRenderpassMS() {
+        const avgRenderpassMS = (this.totalRenderpassMS / this.frameCount);
+        this.debugDiv.innerHTML += `RENDERPASS: ${avgRenderpassMS.toFixed(2)} MS<br>`;
+        this.totalRenderpassMS = 0.0;
     }
 
     ///////////////////////////////////////////////////////////////////////////
@@ -285,6 +360,7 @@ class DebugUI {
             this.printAvgRenderFPS();
             this.printResolution();
             this.printMemoryUsage();
+            this.printRenderpassMS();
 
             this.prevTime = now;
             this.frameCount = 0;
@@ -299,6 +375,11 @@ class DebugUI {
     ///////////////////////////////////////////////////////////////////////////
     public writeDT(dt: number) {
         this.totalFPS += 1000.0 / dt;
+    }
+
+    ///////////////////////////////////////////////////////////////////////////
+    public writeRenderpassMS(ms: number) {
+        this.totalRenderpassMS += ms;
     }
 
     ///////////////////////////////////////////////////////////////////////////
@@ -675,6 +756,17 @@ class Renderer {
     }
 
     ///////////////////////////////////////////////////////////////////////////
+    public async createQuerySet(desc: GPUQuerySetDescriptor): Promise<GPUQuerySet> {
+        this.device.pushErrorScope("validation");
+        const query = this.device.createQuerySet(desc);
+        const err = await this.device.popErrorScope();
+        if (err) {
+            throw new Error(err.message);
+        }
+        return query;
+    }
+
+    ///////////////////////////////////////////////////////////////////////////
     public createCmdEncoder(desc: GPUCommandEncoderDescriptor): GPUCommandEncoder {
         this.device.pushErrorScope("validation");
         const encoder = this.device.createCommandEncoder(desc);
@@ -728,6 +820,11 @@ class Renderer {
     ///////////////////////////////////////////////////////////////////////////
     public maxTextureDimension2D(): number {
         return this.device.limits.maxTextureDimension2D;
+    }
+
+    ///////////////////////////////////////////////////////////////////////////
+    public writeRenderpassMS(ms: number) {
+        this.debugUI.writeRenderpassMS(ms);
     }
 }
 
@@ -820,6 +917,8 @@ async function main() {
             ]
         });
 
+        const renderpassQuery = await TimestampQuery.create(renderer);
+
         const pipelineLayout = await renderer.createPipelineLayout({
             bindGroupLayouts: [
                 bindGroup0Layout,
@@ -839,7 +938,7 @@ async function main() {
             fragment: {
                 module: shaderModule,
                 targets: [{ format: renderer.getPresentationFormat() }]
-            }
+            },
         });
 
         let totalTime: number = 0;
@@ -871,7 +970,8 @@ async function main() {
                     loadOp: "clear",
                     storeOp: "store",
                     view: renderer.createViewForCurrentTexture(),
-                }]
+                }],
+                timestampWrites: renderpassQuery.getTimestampWritesForRenderpass(),
             };
 
             const cmdEncoder = renderer.createCmdEncoder({
@@ -886,8 +986,14 @@ async function main() {
             pass.drawIndexed(6, 4);
             pass.end();
 
+            renderpassQuery.resolve(cmdEncoder);
+
             const commandBuffer = cmdEncoder.finish();
             renderer.submitCmdBuffers([commandBuffer]);
+
+            renderpassQuery.getTimePassed().then(timePassed => {
+                renderer.writeRenderpassMS(timePassed);
+            });
         });
     }
     catch (ex) {
