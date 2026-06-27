@@ -7,8 +7,7 @@ struct VertexInput {
 
 struct VertexOutput {
     @builtin(position) position: vec4f,
-    @location(0) color: vec4h,
-    @location(1) texcoord: vec2h,
+    @location(0) texcoord: vec2h,
 }
 
 struct Transform {
@@ -17,7 +16,7 @@ struct Transform {
 
 struct VertexData {
     position: vec4h,
-    color: vec4h,
+    normal: vec4h,
     texcoord: vec2h,
 }
 
@@ -30,13 +29,10 @@ override applyScale: bool;
 fn vs(in: VertexInput) -> VertexOutput {
 
     let vertexPosition = vertexData[in.vertexIndex].position;
-    let vertexColor = vertexData[in.vertexIndex].color;
     let texcoord = vertexData[in.vertexIndex].texcoord;
 
     var out: VertexOutput;
-    out.position = (transforms[in.instanceIndex].pvm * vec4f(vertexPosition));
-
-    out.color = vertexColor;
+    out.position = transforms[in.instanceIndex].pvm * vec4f(vertexPosition);
     out.texcoord = texcoord;
 
     return out;
@@ -46,13 +42,13 @@ struct FragmentOutput {
     @location(0) canvas_output: vec4f,
 }
 
-@group(0) @binding(2) var dogSampler: sampler;
-@group(0) @binding(3) var dogTexture: texture_2d<f32>;
+@group(0) @binding(2) var imgSampler: sampler;
+@group(0) @binding(3) var imgTexture: texture_2d<f32>;
 
 @fragment
 fn fs(in: VertexOutput) -> FragmentOutput {
     var output: FragmentOutput;
-    output.canvas_output = vec4f(in.color) * textureSample(dogTexture, dogSampler, vec2f(in.texcoord));
+    output.canvas_output = textureSample(imgTexture, imgSampler, vec2f(in.texcoord));
     output.canvas_output = pow(output.canvas_output, vec4(1.0 / 2.2));
     return output;
 }

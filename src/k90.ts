@@ -1,9 +1,9 @@
-
+///////////////////////////////////////////////////////////////////////////
 //////////////////////////// 3RD PARTY LIBRARIES //////////////////////////
 ///////////////////////////////////////////////////////////////////////////
 import * as webgpuMemory from "./webgpu-memory/webgpu-memory.js";
 import * as webgpuUtils from "webgpu-utils";
-import { vec3, quat, mat4 } from "wgpu-matrix";
+import { mat4 } from "wgpu-matrix";
 
 ///////////////////////////////////////////////////////////////////////////
 /////////////////////////////////// CONFIG ////////////////////////////////
@@ -151,25 +151,25 @@ class Geometry {
     public static genQuad<T extends GeometryPrecision>(precision: T): GeometryData {
         const vertices = new ((precision === "half") ? Float16Array : Float32Array)([
             -0.5, -0.5, 0.0, 1.0,       // position
-            1.0, 0.0, 0.0, 1.0,         // color
+            0.0, 0.0, 1.0, 0.0,         // normal
             0.0, 1.0,                   // texcoord
 
             0.0, 0.0,                   // padding
 
             0.5, -0.5, 0.0, 1.0,        // position
-            0.0, 1.0, 0.0, 1.0,         // color
+            0.0, 0.0, 1.0, 0.0,         // normal
             1.0, 1.0,                   // texcoord
 
             0.0, 0.0,                   // padding
 
             -0.5, 0.5, 0.0, 1.0,        // position
-            0.0, 0.0, 1.0, 1.0,         // color
+            0.0, 0.0, 1.0, 0.0,         // normal
             0.0, 0.0,                   // texcoord
 
             0.0, 0.0,                   // padding
 
             0.5, 0.5, 0.0, 1.0,         // position
-            1.0, 1.0, 0.0, 1.0,         // color
+            0.0, 0.0, 1.0, 0.0,         // normal
             1.0, 0.0,                   // texcoord
 
             0.0, 0.0,                   // padding
@@ -178,6 +178,193 @@ class Geometry {
         const indices = new ((precision === "half") ? Uint16Array : Uint32Array)([
             0, 1, 2,
             2, 1, 3,
+        ]);
+
+        return {
+            vertices,
+            indices,
+        };
+    }
+
+    ///////////////////////////////////////////////////////////////////////////
+    public static genCube<T extends GeometryPrecision>(precision: T): GeometryData {
+        const vertices = new ((precision === "half") ? Float16Array : Float32Array)([
+
+            // front face
+            -0.5, -0.5, 0.5, 1.0,       // position
+            0.0, 0.0, 1.0, 0.0,         // normal
+            0.0, 1.0,                   // texcoord
+
+            0.0, 0.0,                   // padding
+
+            0.5, -0.5, 0.5, 1.0,        // position
+            0.0, 0.0, 1.0, 0.0,         // normal
+            1.0, 1.0,                   // texcoord
+
+            0.0, 0.0,                   // padding
+
+            -0.5, 0.5, 0.5, 1.0,        // position
+            0.0, 0.0, 1.0, 0.0,         // normal
+            0.0, 0.0,                   // texcoord
+
+            0.0, 0.0,                   // padding
+
+            0.5, 0.5, 0.5, 1.0,         // position
+            0.0, 0.0, 1.0, 0.0,         // normal
+            1.0, 0.0,                   // texcoord
+
+            0.0, 0.0,                   // padding
+
+            // left face
+            -0.5, -0.5, -0.5, 1.0,      // position
+            -1.0, 0.0, 0.0, 0.0,        // normal
+            0.0, 1.0,                   // texcoord
+
+            0.0, 0.0,                   // padding
+
+            -0.5, -0.5, 0.5, 1.0,       // position
+            -1.0, 0.0, 0.0, 0.0,        // normal
+            1.0, 1.0,                   // texcoord
+
+            0.0, 0.0,                   // padding
+
+            -0.5, 0.5, -0.5, 1.0,       // position
+            -1.0, 0.0, 0.0, 0.0,        // normal
+            0.0, 0.0,                   // texcoord
+
+            0.0, 0.0,                   // padding
+
+            -0.5, 0.5, 0.5, 1.0,        // position
+            -1.0, 0.0, 0.0, 0.0,        // normal
+            1.0, 0.0,                   // texcoord
+
+            0.0, 0.0,                   // padding
+
+            // back face
+            0.5, -0.5, -0.5, 1.0,       // position
+            0.0, 0.0, -1.0, 0.0,        // normal
+            0.0, 1.0,                   // texcoord
+
+            0.0, 0.0,                   // padding
+
+            -0.5, -0.5, -0.5, 1.0,      // position
+            0.0, 0.0, -1.0, 0.0,        // normal
+            1.0, 1.0,                   // texcoord
+
+            0.0, 0.0,                   // padding
+
+            0.5, 0.5, -0.5, 1.0,        // position
+            0.0, 0.0, -1.0, 0.0,        // normal
+            0.0, 0.0,                   // texcoord
+
+            0.0, 0.0,                   // padding
+
+            -0.5, 0.5, -0.5, 1.0,       // position
+            0.0, 0.0, -1.0, 0.0,        // normal
+            1.0, 0.0,                   // texcoord
+
+            0.0, 0.0,                   // padding
+
+            // right face
+            0.5, -0.5, 0.5, 1.0,        // position
+            1.0, 0.0, 0.0, 0.0,         // normal
+            0.0, 1.0,                   // texcoord
+
+            0.0, 0.0,                   // padding
+
+            0.5, -0.5, -0.5, 1.0,       // position
+            1.0, 0.0, 0.0, 0.0,         // normal
+            1.0, 1.0,                   // texcoord
+
+            0.0, 0.0,                   // padding
+
+            0.5, 0.5, 0.5, 1.0,         // position
+            1.0, 0.0, 0.0, 0.0,         // normal
+            0.0, 0.0,                   // texcoord
+
+            0.0, 0.0,                   // padding
+
+            0.5, 0.5, -0.5, 1.0,        // position
+            1.0, 0.0, 0.0, 0.0,         // normal
+            1.0, 0.0,                   // texcoord
+
+            0.0, 0.0,                   // padding
+
+            // top face
+            -0.5, 0.5, 0.5, 1.0,        // position
+            0.0, 1.0, 0.0, 0.0,         // normal
+            0.0, 1.0,                   // texcoord
+
+            0.0, 0.0,                   // padding
+
+            0.5, 0.5, 0.5, 1.0,         // position
+            0.0, 1.0, 0.0, 0.0,         // normal
+            1.0, 1.0,                   // texcoord
+
+            0.0, 0.0,                   // padding
+
+            -0.5, 0.5, -0.5, 1.0,       // position
+            0.0, 1.0, 0.0, 0.0,         // normal
+            0.0, 0.0,                   // texcoord
+
+            0.0, 0.0,                   // padding
+
+            0.5, 0.5, -0.5, 1.0,        // position
+            0.0, 1.0, 0.0, 0.0,         // normal
+            1.0, 0.0,                   // texcoord
+
+            0.0, 0.0,                   // padding
+
+            // bottom face
+            -0.5, -0.5, -0.5, 1.0,      // position
+            0.0, -1.0, 0.0, 0.0,        // normal
+            0.0, 1.0,                   // texcoord
+
+            0.0, 0.0,                   // padding
+
+            0.5, -0.5, -0.5, 1.0,       // position
+            0.0, -1.0, 0.0, 0.0,        // normal
+            1.0, 1.0,                   // texcoord
+
+            0.0, 0.0,                   // padding
+
+            -0.5, -0.5, 0.5, 1.0,       // position
+            0.0, -1.0, 0.0, 0.0,        // normal
+            0.0, 0.0,                   // texcoord
+
+            0.0, 0.0,                   // padding
+
+            0.5, -0.5, 0.5, 1.0,        // position
+            0.0, -1.0, 0.0, 0.0,        // normal
+            1.0, 0.0,                   // texcoord
+
+            0.0, 0.0,                   // padding
+        ]);
+
+        const indices = new ((precision === "half") ? Uint16Array : Uint32Array)([
+            // front face
+            0, 1, 2,
+            2, 1, 3,
+
+            // left face
+            4, 5, 6,
+            6, 5, 7,
+
+            // back face
+            8, 9, 10,
+            10, 9, 11,
+
+            // right face
+            12, 13, 14,
+            14, 13, 15,
+
+            // top face
+            16, 17, 18,
+            18, 17, 19,
+
+            // bottom face
+            20, 21, 22,
+            22, 21, 23,
         ]);
 
         return {
@@ -967,19 +1154,19 @@ async function main() {
     try {
         const renderer = await Renderer.create(K90_CANVAS_DIV_ID);
 
-        const quad = Geometry.genQuad("half");
+        const cube = Geometry.genCube("half");
 
         const indexBuffer = await renderer.createAndWriteBuffer({
             label: "Index Buffer",
-            size: quad.indices.byteLength,
+            size: cube.indices.byteLength,
             usage: GPUBufferUsage.INDEX | GPUBufferUsage.COPY_DST,
-        }, quad.indices);
+        }, cube.indices);
 
         const vertexBuffer = await renderer.createAndWriteBuffer({
             label: "Vertex Buffer",
-            size: quad.vertices.byteLength,
+            size: cube.vertices.byteLength,
             usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
-        }, quad.vertices);
+        }, cube.vertices);
 
         const objectCount = 1;
         const transformBuffer = await TransformBuffer.create(renderer,
@@ -1012,7 +1199,7 @@ async function main() {
                 {
                     binding: 0, visibility: GPUShaderStage.VERTEX, buffer: {
                         type: "read-only-storage",
-                        minBindingSize: quad.vertices.byteLength,
+                        minBindingSize: cube.vertices.byteLength,
                     }
                 },
                 {
@@ -1074,6 +1261,8 @@ async function main() {
 
         renderer.render(async (dt: number) => {
 
+            totalTime += dt * 1e-3;
+
             if (!depthStencilTexture ||
                 depthStencilTexture.width !== renderer.getRenderWidth() ||
                 depthStencilTexture.height !== renderer.getRenderHeight()) {
@@ -1093,12 +1282,12 @@ async function main() {
 
             const proj = mat4.perspectiveReverseZ(fovy, aspect, near, far);
 
-            const eye = [0.0, 0.0, 1.0];
+            const eye = [0.0, 0.0, 2.0];
             const target = [0.0, 0.0, -1.0];
             const up = [0.0, 1.0, 0.0];
 
             const view = mat4.lookAt(eye, target, up);
-            const model = mat4.identity();
+            const model = mat4.axisRotation([1.0, 1.0, 1.0], totalTime);
 
             const pvm = mat4.mul(mat4.mul(proj, view), model);
 
@@ -1107,7 +1296,7 @@ async function main() {
             const renderpassDescriptor: GPURenderPassDescriptor = {
                 label: "render pass descriptor for basic.wgsl",
                 colorAttachments: [{
-                    clearValue: [0.02, 0.02, 0.03, 1.0],
+                    clearValue: [0.2, 0.2, 0.3, 1.0],
                     loadOp: "clear",
                     storeOp: "store",
                     view: renderer.createViewForCurrentTexture(),
@@ -1132,7 +1321,7 @@ async function main() {
             pass.setPipeline(basicPipeline);
             pass.setBindGroup(0, bindGroup0);
             pass.setIndexBuffer(indexBuffer, "uint16");
-            pass.drawIndexed(quad.indices.length, objectCount);
+            pass.drawIndexed(cube.indices.length, objectCount);
             pass.end();
 
             renderpassQuery.resolve(cmdEncoder);
