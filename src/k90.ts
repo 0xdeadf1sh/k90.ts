@@ -707,10 +707,6 @@ export class Renderer {
             throw new Error("WebGPU is not supported!");
         }
 
-        if (!navigator.gpu.wgslLanguageFeatures.has("immediate_address_space")) {
-            throw new Error("This WebGPU implementation has no support for immediates!");
-        }
-
         const adapterOptions: GPURequestAdapterOptions = {
             forceFallbackAdapter: false,
             powerPreference: "high-performance",
@@ -728,9 +724,6 @@ export class Renderer {
         const device = await adapter.requestDevice({
             requiredFeatures: [
                 "core-features-and-limits",
-                "depth32float-stencil8",
-                "float32-filterable",
-                "depth-clip-control",
                 "timestamp-query",
                 "shader-f16",
             ]
