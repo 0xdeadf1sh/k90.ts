@@ -23,8 +23,6 @@ struct VertexData {
 @group(0) @binding(0) var<storage, read> vertexData: array<VertexData>;
 @group(0) @binding(1) var<storage, read> transforms: array<Transform>;
 
-override applyScale: bool;
-
 @vertex
 fn vs(in: VertexInput) -> VertexOutput {
 
