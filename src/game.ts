@@ -13,7 +13,7 @@ import {
 ///////////////////////////////////////////////////////////////////////////
 ///////////////////////////////////// MATH ////////////////////////////////
 ///////////////////////////////////////////////////////////////////////////
-import { mat4 } from "wgpu-matrix";
+import { vec3, mat4 } from "wgpu-matrix";
 
 ///////////////////////////////////////////////////////////////////////////
 ////////////////////////////////// SHADERS ////////////////////////////////
@@ -109,9 +109,6 @@ async function main() {
             layout: pipelineLayout,
             vertex: {
                 module: shaderModule,
-                constants: {
-                    applyScale: 1,
-                }
             },
             fragment: {
                 module: shaderModule,
@@ -132,6 +129,74 @@ async function main() {
         let totalTime: number = 0;
         let depthStencilTexture: GPUTexture | null = null;
 
+        const cameraPosition = [0.0, 0.0, 2.0];
+        const cameraDirection = [0.0, 0.0, -1.0];
+        const cameraUp = [0.0, 1.0, 0.0];
+
+        const cameraVelocity = [0.0, 0.0, 0.0];
+        const cameraRotation = [0.0, 0.0, 0.0];
+
+        const cameraMovementSpeed = 0.1;
+        const cameraRotationSpeed = 0.03;
+        const cameraSmoothing = 5e-3;
+
+        const cameraState = {
+            isMovingForward: false,
+            isMovingBackward: false,
+            isMovingLeft: false,
+            isMovingRight: false,
+            isTurningLeft: false,
+            isTurningRight: false,
+        };
+
+        addEventListener("keydown", e => {
+            if (e.key === "w") {
+                cameraState.isMovingForward = true;
+                cameraState.isMovingBackward = false;
+            }
+            else if (e.key === "s") {
+                cameraState.isMovingForward = false;
+                cameraState.isMovingBackward = true;
+            }
+            if (e.key === "a") {
+                cameraState.isTurningLeft = true;
+                cameraState.isTurningRight = false;
+            }
+            else if (e.key === "d") {
+                cameraState.isTurningLeft = false;
+                cameraState.isTurningRight = true;
+            }
+            if (e.key === "q") {
+                cameraState.isMovingLeft = true;
+                cameraState.isMovingRight = false;
+            }
+            else if (e.key === "e") {
+                cameraState.isMovingLeft = false;
+                cameraState.isMovingRight = true;
+            }
+        });
+
+        addEventListener("keyup", e => {
+            if (e.key === "w") {
+                cameraState.isMovingForward = false;
+            }
+            else if (e.key === "s") {
+                cameraState.isMovingBackward = false;
+            }
+            if (e.key === "a") {
+                cameraState.isTurningLeft = false;
+            }
+            else if (e.key === "d") {
+                cameraState.isTurningRight = false;
+            }
+            if (e.key === "q") {
+                cameraState.isMovingLeft = false;
+            }
+            else if (e.key === "e") {
+                cameraState.isMovingRight = false;
+            }
+        });
+
         renderer.render(async (dt: number) => {
 
             totalTime += dt * 1e-3;
@@ -148,20 +213,47 @@ async function main() {
                 Log.info(`Created a depth-stencil texture of size ${w}x${h}`);
             }
 
-            const fovy = Util.toRadians(90.0);
-            const aspect = renderer.getAspectRatio();
-            const near = 0.1;
-            const far = 1000.0;
+            const cameraFovy = Util.toRadians(90.0);
+            const cameraAspect = renderer.getAspectRatio();
+            const cameraNear = 1.0;
+            const cameraFar = 1000.0;
+            const proj = mat4.perspectiveReverseZ(cameraFovy, cameraAspect, cameraNear, cameraFar);
 
-            const proj = mat4.perspectiveReverseZ(fovy, aspect, near, far);
+            const newCameraVelocity = [0.0, 0.0, 0.0];
 
-            const eye = [0.0, 0.0, 2.0];
-            const target = [0.0, 0.0, -1.0];
-            const up = [0.0, 1.0, 0.0];
+            if (cameraState.isMovingForward) {
+                vec3.add(cameraDirection, newCameraVelocity, newCameraVelocity);
+            }
+            else if (cameraState.isMovingBackward) {
+                vec3.add(vec3.negate(cameraDirection), newCameraVelocity, newCameraVelocity);
+            }
 
-            const view = mat4.lookAt(eye, target, up);
+            if (cameraState.isMovingLeft) {
+                vec3.add(vec3.negate(vec3.cross(cameraDirection, cameraUp)), newCameraVelocity, newCameraVelocity);
+            }
+            else if (cameraState.isMovingRight) {
+                vec3.add(vec3.cross(cameraDirection, cameraUp), newCameraVelocity, newCameraVelocity);
+            }
+
+            const newCameraRotation = [0.0, 0.0, 0.0];
+            if (cameraState.isTurningLeft) {
+                vec3.set(0.0, 1.0, 0.0, newCameraRotation);
+            }
+            else if (cameraState.isTurningRight) {
+                vec3.set(0.0, -1.0, 0.0, newCameraRotation);
+            }
+
+            vec3.normalize(newCameraVelocity, newCameraVelocity);
+            vec3.mulScalar(newCameraVelocity, cameraMovementSpeed, newCameraVelocity);
+
+            vec3.lerp(cameraVelocity, newCameraVelocity, dt * cameraSmoothing, cameraVelocity);
+            vec3.add(cameraPosition, cameraVelocity, cameraPosition);
+
+            vec3.lerp(cameraRotation, vec3.mulScalar(newCameraRotation, cameraRotationSpeed), dt * cameraSmoothing, cameraRotation);
+            vec3.rotateY(cameraDirection, [0.0, 0.0, 0.0], cameraRotation[1] ?? 0.0, cameraDirection);
+
+            const view = mat4.lookAt(cameraPosition, vec3.add(cameraPosition, cameraDirection), cameraUp);
             const model = mat4.axisRotation([1.0, 1.0, 1.0], totalTime);
-
             const pvm = mat4.mul(mat4.mul(proj, view), model);
 
             transformBuffer.upload([{ pvm }]);
