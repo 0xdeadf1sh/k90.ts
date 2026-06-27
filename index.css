@@ -30,7 +30,7 @@ div#k90-exception {
     display: none;
     height: 100%;
     width: 100%;
-    overflow: scroll;
+    overflow: auto;
 }
 
 div#k90-logs {
@@ -42,7 +42,7 @@ div#k90-logs {
     left: 10px;
     right: 10px;
     position: absolute;
-    overflow: scroll;
+    overflow: auto;
     display: flex;
     flex-direction: column;
 }
