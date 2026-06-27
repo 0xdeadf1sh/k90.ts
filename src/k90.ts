@@ -3,6 +3,7 @@
 ///////////////////////////////////////////////////////////////////////////
 import * as webgpuMemory from "./webgpu-memory/webgpu-memory.js";
 import * as webgpuUtils from "webgpu-utils";
+import { vec4 } from "wgpu-matrix";
 
 ///////////////////////////////////////////////////////////////////////////
 /////////////////////////////////// CONFIG ////////////////////////////////
@@ -391,6 +392,67 @@ class DebugUI {
     public endRender() {
         const now = performance.now();
         this.totalRender += now - this.prevRender;
+    }
+}
+
+///////////////////////////////////////////////////////////////////////////
+///////////////////////////// TRANSFORM BUFFER ////////////////////////////
+///////////////////////////////////////////////////////////////////////////
+
+///////////////////////////////////////////////////////////////////////////
+interface TransformBufferContents {
+    translation: Float32Array,
+    scale: Float32Array,
+}
+
+///////////////////////////////////////////////////////////////////////////
+class TransformBuffer {
+
+    ///////////////////////////////////////////////////////////////////////////
+    private constructor(private readonly renderer: Renderer,
+        private readonly gpuBuffer: GPUBuffer,
+        private readonly view: webgpuUtils.StructuredView,
+        private readonly count: number,
+        private readonly size: number) { }
+
+    ///////////////////////////////////////////////////////////////////////////
+    public totalSizeInBytes() {
+        return this.count * this.size;
+    }
+
+    ///////////////////////////////////////////////////////////////////////////
+    public getBuffer(): GPUBuffer {
+        return this.gpuBuffer;
+    }
+
+    ///////////////////////////////////////////////////////////////////////////
+    public static async create(renderer: Renderer, code: string, count: number): Promise<TransformBuffer> {
+        const defs = webgpuUtils.makeShaderDataDefinitions(code);
+        if (!defs.storages["transform"]) {
+            throw new Error("transform: Transform not found in the shader!");
+        }
+
+        const variableDef = defs.storages["transform"];
+        const { size } = webgpuUtils.getSizeAndAlignmentOfUnsizedArrayElement(variableDef);
+        const totalSizeInBytes = size * count;
+
+        const view = webgpuUtils.makeStructuredView(variableDef, new ArrayBuffer(totalSizeInBytes));
+
+        const buffer = await renderer.createBuffer({
+            size: totalSizeInBytes,
+            usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
+        });
+
+        return new TransformBuffer(renderer, buffer, view, count, size);
+    }
+
+    ///////////////////////////////////////////////////////////////////////////
+    public async upload(values: Array<TransformBufferContents>) {
+        if (values.length !== this.count) {
+            throw new Error(`There needs to be ${this.count} elements!`);
+        }
+        this.view.set(values);
+        await this.renderer.writeBuffer(this.gpuBuffer, this.view.arrayBuffer);
     }
 }
 
@@ -849,23 +911,7 @@ async function main() {
             usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
         }, quad.vertices);
 
-        const basicWgslDefs = webgpuUtils.makeShaderDataDefinitions(wgslBasicCode);
-        if (!basicWgslDefs.storages["transform"]) {
-            throw new Error("No uniforms found in basic.wgsl");
-        }
-
-        const variableDef = basicWgslDefs.storages["transform"];
-        const elemCount = 4;
-        const { size } = webgpuUtils.getSizeAndAlignmentOfUnsizedArrayElement(variableDef);
-        const totalBytes = size * elemCount;
-
-        const transformValues = webgpuUtils.makeStructuredView(basicWgslDefs.storages["transform"], new ArrayBuffer(totalBytes));
-
-        const transformBuffer = await renderer.createBuffer({
-            label: "Transform Buffer",
-            size: totalBytes,
-            usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
-        });
+        const transformBuffer = await TransformBuffer.create(renderer, wgslBasicCode, 4);
 
         const shaderModule = await renderer.createShaderModule({
             label: "basic.wgsl",
@@ -899,7 +945,7 @@ async function main() {
                 {
                     binding: 1, visibility: GPUShaderStage.VERTEX, buffer: {
                         type: "read-only-storage",
-                        minBindingSize: totalBytes,
+                        minBindingSize: transformBuffer.totalSizeInBytes(),
                     }
                 },
                 { binding: 2, visibility: GPUShaderStage.FRAGMENT, sampler: {} },
@@ -911,7 +957,7 @@ async function main() {
             layout: bindGroup0Layout,
             entries: [
                 { binding: 0, resource: vertexBuffer },
-                { binding: 1, resource: transformBuffer },
+                { binding: 1, resource: transformBuffer.getBuffer() },
                 { binding: 2, resource: sampler },
                 { binding: 3, resource: texture },
             ]
@@ -923,7 +969,6 @@ async function main() {
             bindGroupLayouts: [
                 bindGroup0Layout,
             ],
-            immediateSize: 64,
         });
 
         const basicPipeline = await renderer.createRenderPipeline({
@@ -939,6 +984,9 @@ async function main() {
                 module: shaderModule,
                 targets: [{ format: renderer.getPresentationFormat() }]
             },
+            primitive: {
+                cullMode: "back",
+            },
         });
 
         let totalTime: number = 0;
@@ -947,21 +995,19 @@ async function main() {
 
             totalTime += dt * 1e-3;
 
-            transformValues.set([{
-                translation: [-0.75, -0.75, 0.0, 0.0],
-                scale: [0.5, 0.5, 1.0, 1.0,],
+            transformBuffer.upload([{
+                translation: vec4.create(-0.75, -0.75, 0.0, 0.0),
+                scale: vec4.create(0.5, 0.5, 1.0, 1.0),
             }, {
-                translation: [0.75, -0.75, 0.0, 0.0],
-                scale: [0.5, 0.5, 1.0, 1.0,],
+                translation: vec4.create(0.75, -0.75, 0.0, 0.0),
+                scale: vec4.create(0.5, 0.5, 1.0, 1.0),
             }, {
-                translation: [-0.75, 0.75, 0.0, 0.0],
-                scale: [0.75, 0.75, 1.0, 1.0,],
+                translation: vec4.create(-0.75, 0.75, 0.0, 0.0),
+                scale: vec4.create(0.75, 0.75, 1.0, 1.0),
             }, {
-                translation: [0.75, 0.75, 0.0, 0.0],
-                scale: [0.75, 0.75, 1.0, 1.0,],
+                translation: vec4.create(0.75, 0.75, 0.0, 0.0),
+                scale: vec4.create(0.75, 0.75, 1.0, 1.0),
             }]);
-
-            await renderer.writeBuffer(transformBuffer, transformValues.arrayBuffer);
 
             const renderpassDescriptor: GPURenderPassDescriptor = {
                 label: "render pass descriptor for basic.wgsl",
@@ -982,7 +1028,6 @@ async function main() {
             pass.setPipeline(basicPipeline);
             pass.setBindGroup(0, bindGroup0);
             pass.setIndexBuffer(indexBuffer, "uint16");
-            pass.setImmediates(0, new Float32Array([0.0, 0.0, 0.0, 0.0]));
             pass.drawIndexed(6, 4);
             pass.end();
 

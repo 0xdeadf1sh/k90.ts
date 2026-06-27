@@ -22,14 +22,8 @@ struct VertexData {
     texcoord: vec2h,
 }
 
-struct ImTest {
-    offset: vec4f,
-}
-
 @group(0) @binding(0) var<storage, read> vertexData: array<VertexData>;
 @group(0) @binding(1) var<storage, read> transform: array<Transform>;
-
-var<immediate> imtest: ImTest;
 
 override applyScale: bool;
 
@@ -44,7 +38,7 @@ fn vs(in: VertexInput) -> VertexOutput {
     let scale = transform[in.instanceIndex].scale;
 
     var out: VertexOutput;
-    out.position = (vec4f(vertexPosition) + translation + imtest.offset);
+    out.position = (vec4f(vertexPosition) + translation);
 
     if applyScale {
         out.position *= scale;
