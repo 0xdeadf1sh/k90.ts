@@ -12,8 +12,7 @@ struct VertexOutput {
 }
 
 struct Transform {
-    translation: vec4f,
-    scale: vec4f,
+    pvm: mat4x4f,
 }
 
 struct VertexData {
@@ -23,7 +22,7 @@ struct VertexData {
 }
 
 @group(0) @binding(0) var<storage, read> vertexData: array<VertexData>;
-@group(0) @binding(1) var<storage, read> transform: array<Transform>;
+@group(0) @binding(1) var<storage, read> transforms: array<Transform>;
 
 override applyScale: bool;
 
@@ -34,15 +33,8 @@ fn vs(in: VertexInput) -> VertexOutput {
     let vertexColor = vertexData[in.vertexIndex].color;
     let texcoord = vertexData[in.vertexIndex].texcoord;
 
-    let translation = transform[in.instanceIndex].translation;
-    let scale = transform[in.instanceIndex].scale;
-
     var out: VertexOutput;
-    out.position = (vec4f(vertexPosition) + translation);
-
-    if applyScale {
-        out.position *= scale;
-    }
+    out.position = (transforms[in.instanceIndex].pvm * vec4f(vertexPosition));
 
     out.color = vertexColor;
     out.texcoord = texcoord;

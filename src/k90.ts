@@ -1,9 +1,9 @@
-///////////////////////////////////////////////////////////////////////////
+
 //////////////////////////// 3RD PARTY LIBRARIES //////////////////////////
 ///////////////////////////////////////////////////////////////////////////
 import * as webgpuMemory from "./webgpu-memory/webgpu-memory.js";
 import * as webgpuUtils from "webgpu-utils";
-import { vec4 } from "wgpu-matrix";
+import { vec3, quat, mat4 } from "wgpu-matrix";
 
 ///////////////////////////////////////////////////////////////////////////
 /////////////////////////////////// CONFIG ////////////////////////////////
@@ -45,6 +45,16 @@ class Util {
     ///////////////////////////////////////////////////////////////////////////
     public static bytesToMebi(bytes: number): number {
         return bytes >> 20;
+    }
+
+    ///////////////////////////////////////////////////////////////////////////
+    public static toRadians(deg: number): number {
+        return deg * Math.PI / 180.0;
+    }
+
+    ///////////////////////////////////////////////////////////////////////////
+    public static toDegrees(rad: number): number {
+        return rad * 180.0 / Math.PI;
     }
 }
 
@@ -240,9 +250,18 @@ class TimestampQuery {
 
     ///////////////////////////////////////////////////////////////////////////
     public resolve(encoder: GPUCommandEncoder) {
-        encoder.resolveQuerySet(this.querySet, 0, this.querySet.count, this.resolveBuffer, 0);
+        encoder.resolveQuerySet(this.querySet,
+            0,
+            this.querySet.count,
+            this.resolveBuffer,
+            0);
+
         if (this.readBuffer.mapState === "unmapped") {
-            encoder.copyBufferToBuffer(this.resolveBuffer, 0, this.readBuffer, 0, this.readBuffer.size);
+            encoder.copyBufferToBuffer(this.resolveBuffer,
+                0,
+                this.readBuffer,
+                0,
+                this.readBuffer.size);
         }
     }
 
@@ -401,8 +420,7 @@ class DebugUI {
 
 ///////////////////////////////////////////////////////////////////////////
 interface TransformBufferContents {
-    translation: Float32Array,
-    scale: Float32Array,
+    pvm: Float32Array,
 }
 
 ///////////////////////////////////////////////////////////////////////////
@@ -426,17 +444,21 @@ class TransformBuffer {
     }
 
     ///////////////////////////////////////////////////////////////////////////
-    public static async create(renderer: Renderer, code: string, count: number): Promise<TransformBuffer> {
+    public static async create(renderer: Renderer,
+        code: string,
+        count: number): Promise<TransformBuffer> {
+
         const defs = webgpuUtils.makeShaderDataDefinitions(code);
-        if (!defs.storages["transform"]) {
-            throw new Error("transform: Transform not found in the shader!");
+        if (!defs.storages["transforms"]) {
+            throw new Error("transform: Transforms not found in the shader!");
         }
 
-        const variableDef = defs.storages["transform"];
+        const variableDef = defs.storages["transforms"];
         const { size } = webgpuUtils.getSizeAndAlignmentOfUnsizedArrayElement(variableDef);
         const totalSizeInBytes = size * count;
 
-        const view = webgpuUtils.makeStructuredView(variableDef, new ArrayBuffer(totalSizeInBytes));
+        const view = webgpuUtils.makeStructuredView(variableDef,
+            new ArrayBuffer(totalSizeInBytes));
 
         const buffer = await renderer.createBuffer({
             size: totalSizeInBytes,
@@ -468,7 +490,11 @@ interface RendererConstructorParams {
 ///////////////////////////////////////////////////////////////////////////
 ////////////////////////////// RENDERER TYPES /////////////////////////////
 ///////////////////////////////////////////////////////////////////////////
-type TypedArray = Uint16Array | Uint32Array | Float16Array | Float32Array | ArrayBuffer;
+type TypedArray = Uint16Array |
+    Uint32Array |
+    Float16Array |
+    Float32Array |
+    ArrayBuffer;
 
 ///////////////////////////////////////////////////////////////////////////
 ///////////////////////////////// RENDERER ////////////////////////////////
@@ -606,7 +632,7 @@ class Renderer {
                 height = Util.clamp(height, 1, this.maxTextureDimension2D());
 
                 if (this.canvas.width !== width || this.canvas.height !== height) {
-                    Log.info(`Resizing from ${this.canvas.width} x ${this.canvas.height} to ${width} x ${height}`);
+                    Log.info(`Resizing from ${this.canvas.width}x${this.canvas.height} to ${width}x${height}`);
 
                     this.canvas.width = width;
                     this.canvas.height = height;
@@ -629,7 +655,10 @@ class Renderer {
     }
 
     ///////////////////////////////////////////////////////////////////////////
-    public async writeBuffer(buffer: GPUBuffer, data: TypedArray, offset: number = 0): Promise<void> {
+    public async writeBuffer(buffer: GPUBuffer,
+        data: TypedArray,
+        offset: number = 0): Promise<void> {
+
         this.device.pushErrorScope("validation");
         this.device.queue.writeBuffer(buffer, offset, data);
         const err = await this.device.popErrorScope();
@@ -639,7 +668,10 @@ class Renderer {
     }
 
     ///////////////////////////////////////////////////////////////////////////
-    public async createAndWriteBuffer(desc: GPUBufferDescriptor, data: TypedArray, offset: number = 0): Promise<GPUBuffer> {
+    public async createAndWriteBuffer(desc: GPUBufferDescriptor,
+        data: TypedArray,
+        offset: number = 0): Promise<GPUBuffer> {
+
         const buffer = await this.createBuffer(desc);
         await this.writeBuffer(buffer, data, offset);
         return buffer;
@@ -693,7 +725,30 @@ class Renderer {
     }
 
     ///////////////////////////////////////////////////////////////////////////
-    public async createTextureFromBitmap(url: string, format: GPUTextureFormat): Promise<GPUTexture> {
+    public async createDepthStencilTexture(width: number,
+        height: number): Promise<GPUTexture> {
+
+        this.device.pushErrorScope("validation");
+        const texture = this.device.createTexture({
+            label: "Depth-Stencil texture",
+            format: "depth24plus-stencil8",
+            size: [width, height, 1],
+            usage: GPUTextureUsage.RENDER_ATTACHMENT,
+            mipLevelCount: 1,
+            sampleCount: 1,
+            dimension: "2d",
+        });
+        const err = await this.device.popErrorScope();
+        if (err) {
+            throw new Error(err.message);
+        }
+        return texture;
+    }
+
+    ///////////////////////////////////////////////////////////////////////////
+    public async createTextureFromBitmap(url: string,
+        format: GPUTextureFormat): Promise<GPUTexture> {
+
         const data = await Util.loadImageBitmap(url);
 
         if (data.width > this.maxTextureDimension2D() || data.height > this.maxTextureDimension2D()) {
@@ -888,6 +943,21 @@ class Renderer {
     public writeRenderpassMS(ms: number) {
         this.debugUI.writeRenderpassMS(ms);
     }
+
+    ///////////////////////////////////////////////////////////////////////////
+    public getAspectRatio(): number {
+        return this.canvas.width / this.canvas.height;
+    }
+
+    ///////////////////////////////////////////////////////////////////////////
+    public getRenderWidth(): number {
+        return this.canvas.width;
+    }
+
+    ///////////////////////////////////////////////////////////////////////////
+    public getRenderHeight(): number {
+        return this.canvas.height;
+    }
 }
 
 ///////////////////////////////////////////////////////////////////////////
@@ -911,7 +981,10 @@ async function main() {
             usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
         }, quad.vertices);
 
-        const transformBuffer = await TransformBuffer.create(renderer, wgslBasicCode, 4);
+        const objectCount = 1;
+        const transformBuffer = await TransformBuffer.create(renderer,
+            wgslBasicCode,
+            objectCount);
 
         const shaderModule = await renderer.createShaderModule({
             label: "basic.wgsl",
@@ -950,7 +1023,7 @@ async function main() {
                 },
                 { binding: 2, visibility: GPUShaderStage.FRAGMENT, sampler: {} },
                 { binding: 3, visibility: GPUShaderStage.FRAGMENT, texture: {} },
-            ]
+            ],
         });
 
         const bindGroup0 = await renderer.createBindGroup({
@@ -960,7 +1033,7 @@ async function main() {
                 { binding: 1, resource: transformBuffer.getBuffer() },
                 { binding: 2, resource: sampler },
                 { binding: 3, resource: texture },
-            ]
+            ],
         });
 
         const renderpassQuery = await TimestampQuery.create(renderer);
@@ -985,38 +1058,69 @@ async function main() {
                 targets: [{ format: renderer.getPresentationFormat() }]
             },
             primitive: {
+                topology: "triangle-list",
                 cullMode: "back",
+                frontFace: "ccw",
+            },
+            depthStencil: {
+                format: "depth24plus-stencil8",
+                depthCompare: "greater",
+                depthWriteEnabled: true,
             },
         });
 
         let totalTime: number = 0;
+        let depthStencilTexture: GPUTexture | null = null;
 
         renderer.render(async (dt: number) => {
 
-            totalTime += dt * 1e-3;
+            if (!depthStencilTexture ||
+                depthStencilTexture.width !== renderer.getRenderWidth() ||
+                depthStencilTexture.height !== renderer.getRenderHeight()) {
 
-            transformBuffer.upload([{
-                translation: vec4.create(-0.75, -0.75, 0.0, 0.0),
-                scale: vec4.create(0.5, 0.5, 1.0, 1.0),
-            }, {
-                translation: vec4.create(0.75, -0.75, 0.0, 0.0),
-                scale: vec4.create(0.5, 0.5, 1.0, 1.0),
-            }, {
-                translation: vec4.create(-0.75, 0.75, 0.0, 0.0),
-                scale: vec4.create(0.75, 0.75, 1.0, 1.0),
-            }, {
-                translation: vec4.create(0.75, 0.75, 0.0, 0.0),
-                scale: vec4.create(0.75, 0.75, 1.0, 1.0),
-            }]);
+                depthStencilTexture?.destroy();
+
+                const w = renderer.getRenderWidth();
+                const h = renderer.getRenderHeight();
+                depthStencilTexture = await renderer.createDepthStencilTexture(w, h);
+                Log.info(`Created a depth-stencil texture of size ${w}x${h}`);
+            }
+
+            const fovy = Util.toRadians(90.0);
+            const aspect = renderer.getAspectRatio();
+            const near = 0.1;
+            const far = 1000.0;
+
+            const proj = mat4.perspectiveReverseZ(fovy, aspect, near, far);
+
+            const eye = [0.0, 0.0, 1.0];
+            const target = [0.0, 0.0, -1.0];
+            const up = [0.0, 1.0, 0.0];
+
+            const view = mat4.lookAt(eye, target, up);
+            const model = mat4.identity();
+
+            const pvm = mat4.mul(mat4.mul(proj, view), model);
+
+            transformBuffer.upload([{ pvm }]);
 
             const renderpassDescriptor: GPURenderPassDescriptor = {
                 label: "render pass descriptor for basic.wgsl",
                 colorAttachments: [{
-                    clearValue: [Math.cos(totalTime) * 0.5 + 0.5, 0.5, 0.5, 1.0],
+                    clearValue: [0.02, 0.02, 0.03, 1.0],
                     loadOp: "clear",
                     storeOp: "store",
                     view: renderer.createViewForCurrentTexture(),
                 }],
+                depthStencilAttachment: {
+                    view: depthStencilTexture.createView(),
+                    depthLoadOp: "clear",
+                    depthStoreOp: "store",
+                    depthClearValue: 0.0,
+                    stencilLoadOp: "clear",
+                    stencilStoreOp: "discard",
+                    stencilClearValue: 0.0,
+                },
                 timestampWrites: renderpassQuery.getTimestampWritesForRenderpass(),
             };
 
@@ -1028,7 +1132,7 @@ async function main() {
             pass.setPipeline(basicPipeline);
             pass.setBindGroup(0, bindGroup0);
             pass.setIndexBuffer(indexBuffer, "uint16");
-            pass.drawIndexed(6, 4);
+            pass.drawIndexed(quad.indices.length, objectCount);
             pass.end();
 
             renderpassQuery.resolve(cmdEncoder);
