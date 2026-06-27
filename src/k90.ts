@@ -3,7 +3,6 @@
 ///////////////////////////////////////////////////////////////////////////
 import * as webgpuMemory from "./webgpu-memory/webgpu-memory.js";
 import * as webgpuUtils from "webgpu-utils";
-import { mat4 } from "wgpu-matrix";
 
 ///////////////////////////////////////////////////////////////////////////
 /////////////////////////////////// CONFIG ////////////////////////////////
@@ -11,15 +10,9 @@ import { mat4 } from "wgpu-matrix";
 import packageJson from "../package.json";
 
 ///////////////////////////////////////////////////////////////////////////
-////////////////////////////////// SHADERS ////////////////////////////////
-///////////////////////////////////////////////////////////////////////////
-import wgslBasicCode from "../shaders/basic.wgsl?raw";
-
-///////////////////////////////////////////////////////////////////////////
 ///////////////////////////////// CONSTANTS ///////////////////////////////
 ///////////////////////////////////////////////////////////////////////////
 const K90_LOGGER_DIV_ID = "k90-logs";
-const K90_CANVAS_DIV_ID = "k90-renderer";
 const K90_DEBUG_UI_FPS = "k90-debug";
 const K90_RECOMMENDED_MIN_FPS = 50;
 const K90_WARNING_MIN_FPS = 30;
@@ -28,7 +21,7 @@ const K90_MAX_LOGS = 100;
 ///////////////////////////////////////////////////////////////////////////
 ///////////////////////////////// UTILITIES ///////////////////////////////
 ///////////////////////////////////////////////////////////////////////////
-class Util {
+export class Util {
 
     ///////////////////////////////////////////////////////////////////////////
     public static clamp(k: number, min: number, max: number): number {
@@ -61,7 +54,7 @@ class Util {
 ///////////////////////////////////////////////////////////////////////////
 ////////////////////////////////// LOGGING ////////////////////////////////
 ///////////////////////////////////////////////////////////////////////////
-class Log {
+export class Log {
 
     ///////////////////////////////////////////////////////////////////////////
     private static _logDiv: HTMLDivElement;
@@ -136,16 +129,16 @@ class Log {
 ///////////////////////////////////////////////////////////////////////////
 
 ///////////////////////////////////////////////////////////////////////////
-interface GeometryData {
+export interface GeometryData {
     vertices: Float16Array | Float32Array,
     indices: Uint16Array | Uint32Array,
 }
 
 ///////////////////////////////////////////////////////////////////////////
-type GeometryPrecision = "half" | "full";
+export type GeometryPrecision = "half" | "full";
 
 ///////////////////////////////////////////////////////////////////////////
-class Geometry {
+export class Geometry {
 
     ///////////////////////////////////////////////////////////////////////////
     public static genQuad<T extends GeometryPrecision>(precision: T): GeometryData {
@@ -377,7 +370,7 @@ class Geometry {
 ///////////////////////////////////////////////////////////////////////////
 ////////////////////////// DELTA-TIME COMPUTATION /////////////////////////
 ///////////////////////////////////////////////////////////////////////////
-class DeltaTime {
+export class DeltaTime {
 
     ///////////////////////////////////////////////////////////////////////////
     private previous: number;
@@ -399,7 +392,7 @@ class DeltaTime {
 ///////////////////////////////////////////////////////////////////////////
 ////////////////////////////////// QUERIES ////////////////////////////////
 ///////////////////////////////////////////////////////////////////////////
-class TimestampQuery {
+export class TimestampQuery {
 
     ///////////////////////////////////////////////////////////////////////////
     private constructor(private readonly querySet: GPUQuerySet,
@@ -471,7 +464,7 @@ class TimestampQuery {
 ///////////////////////////////////////////////////////////////////////////
 ////////////////////////// PERFORMANCE ELEMENTS ///////////////////////////
 ///////////////////////////////////////////////////////////////////////////
-class DebugUI {
+export class DebugUI {
 
     ///////////////////////////////////////////////////////////////////////////
     private readonly debugDiv: HTMLDivElement;
@@ -606,12 +599,12 @@ class DebugUI {
 ///////////////////////////////////////////////////////////////////////////
 
 ///////////////////////////////////////////////////////////////////////////
-interface TransformBufferContents {
+export interface TransformBufferContents {
     pvm: Float32Array,
 }
 
 ///////////////////////////////////////////////////////////////////////////
-class TransformBuffer {
+export class TransformBuffer {
 
     ///////////////////////////////////////////////////////////////////////////
     private constructor(private readonly renderer: Renderer,
@@ -668,7 +661,7 @@ class TransformBuffer {
 ///////////////////////////////////////////////////////////////////////////
 ///////////////////////////// RENDERER PARAMS /////////////////////////////
 ///////////////////////////////////////////////////////////////////////////
-interface RendererConstructorParams {
+export interface RendererConstructorParams {
     canvas: HTMLCanvasElement;
     adapter: GPUAdapter;
     device: GPUDevice;
@@ -677,7 +670,7 @@ interface RendererConstructorParams {
 ///////////////////////////////////////////////////////////////////////////
 ////////////////////////////// RENDERER TYPES /////////////////////////////
 ///////////////////////////////////////////////////////////////////////////
-type TypedArray = Uint16Array |
+export type TypedArray = Uint16Array |
     Uint32Array |
     Float16Array |
     Float32Array |
@@ -686,7 +679,7 @@ type TypedArray = Uint16Array |
 ///////////////////////////////////////////////////////////////////////////
 ///////////////////////////////// RENDERER ////////////////////////////////
 ///////////////////////////////////////////////////////////////////////////
-class Renderer {
+export class Renderer {
 
     ///////////////////////////////////////////////////////////////////////////
     ////////////////////////////// WEBGPU CONTEXT /////////////////////////////
@@ -1146,213 +1139,3 @@ class Renderer {
         return this.canvas.height;
     }
 }
-
-///////////////////////////////////////////////////////////////////////////
-////////////////////////////////// ENTRY //////////////////////////////////
-///////////////////////////////////////////////////////////////////////////
-async function main() {
-    try {
-        const renderer = await Renderer.create(K90_CANVAS_DIV_ID);
-
-        const cube = Geometry.genCube("half");
-
-        const indexBuffer = await renderer.createAndWriteBuffer({
-            label: "Index Buffer",
-            size: cube.indices.byteLength,
-            usage: GPUBufferUsage.INDEX | GPUBufferUsage.COPY_DST,
-        }, cube.indices);
-
-        const vertexBuffer = await renderer.createAndWriteBuffer({
-            label: "Vertex Buffer",
-            size: cube.vertices.byteLength,
-            usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
-        }, cube.vertices);
-
-        const objectCount = 1;
-        const transformBuffer = await TransformBuffer.create(renderer,
-            wgslBasicCode,
-            objectCount);
-
-        const shaderModule = await renderer.createShaderModule({
-            label: "basic.wgsl",
-            code: wgslBasicCode,
-        });
-
-        const texture = await renderer.createTextureFromBitmap(
-            "/assets/textures/cat/cat.jpg",
-            "rgba8unorm-srgb",
-        );
-
-        const sampler = await renderer.createSampler({
-            label: "Dog Sampler",
-            addressModeU: "repeat",
-            addressModeV: "repeat",
-            addressModeW: "repeat",
-            minFilter: "linear",
-            magFilter: "linear",
-            mipmapFilter: "linear",
-            maxAnisotropy: 4,
-        });
-
-        const bindGroup0Layout = await renderer.createBindGroupLayout({
-            entries: [
-                {
-                    binding: 0, visibility: GPUShaderStage.VERTEX, buffer: {
-                        type: "read-only-storage",
-                        minBindingSize: cube.vertices.byteLength,
-                    }
-                },
-                {
-                    binding: 1, visibility: GPUShaderStage.VERTEX, buffer: {
-                        type: "read-only-storage",
-                        minBindingSize: transformBuffer.totalSizeInBytes(),
-                    }
-                },
-                { binding: 2, visibility: GPUShaderStage.FRAGMENT, sampler: {} },
-                { binding: 3, visibility: GPUShaderStage.FRAGMENT, texture: {} },
-            ],
-        });
-
-        const bindGroup0 = await renderer.createBindGroup({
-            layout: bindGroup0Layout,
-            entries: [
-                { binding: 0, resource: vertexBuffer },
-                { binding: 1, resource: transformBuffer.getBuffer() },
-                { binding: 2, resource: sampler },
-                { binding: 3, resource: texture },
-            ],
-        });
-
-        const renderpassQuery = await TimestampQuery.create(renderer);
-
-        const pipelineLayout = await renderer.createPipelineLayout({
-            bindGroupLayouts: [
-                bindGroup0Layout,
-            ],
-        });
-
-        const basicPipeline = await renderer.createRenderPipeline({
-            label: "basic.wgsl",
-            layout: pipelineLayout,
-            vertex: {
-                module: shaderModule,
-                constants: {
-                    applyScale: 1,
-                }
-            },
-            fragment: {
-                module: shaderModule,
-                targets: [{ format: renderer.getPresentationFormat() }]
-            },
-            primitive: {
-                topology: "triangle-list",
-                cullMode: "back",
-                frontFace: "ccw",
-            },
-            depthStencil: {
-                format: "depth24plus-stencil8",
-                depthCompare: "greater",
-                depthWriteEnabled: true,
-            },
-        });
-
-        let totalTime: number = 0;
-        let depthStencilTexture: GPUTexture | null = null;
-
-        renderer.render(async (dt: number) => {
-
-            totalTime += dt * 1e-3;
-
-            if (!depthStencilTexture ||
-                depthStencilTexture.width !== renderer.getRenderWidth() ||
-                depthStencilTexture.height !== renderer.getRenderHeight()) {
-
-                depthStencilTexture?.destroy();
-
-                const w = renderer.getRenderWidth();
-                const h = renderer.getRenderHeight();
-                depthStencilTexture = await renderer.createDepthStencilTexture(w, h);
-                Log.info(`Created a depth-stencil texture of size ${w}x${h}`);
-            }
-
-            const fovy = Util.toRadians(90.0);
-            const aspect = renderer.getAspectRatio();
-            const near = 0.1;
-            const far = 1000.0;
-
-            const proj = mat4.perspectiveReverseZ(fovy, aspect, near, far);
-
-            const eye = [0.0, 0.0, 2.0];
-            const target = [0.0, 0.0, -1.0];
-            const up = [0.0, 1.0, 0.0];
-
-            const view = mat4.lookAt(eye, target, up);
-            const model = mat4.axisRotation([1.0, 1.0, 1.0], totalTime);
-
-            const pvm = mat4.mul(mat4.mul(proj, view), model);
-
-            transformBuffer.upload([{ pvm }]);
-
-            const renderpassDescriptor: GPURenderPassDescriptor = {
-                label: "render pass descriptor for basic.wgsl",
-                colorAttachments: [{
-                    clearValue: [0.2, 0.2, 0.3, 1.0],
-                    loadOp: "clear",
-                    storeOp: "store",
-                    view: renderer.createViewForCurrentTexture(),
-                }],
-                depthStencilAttachment: {
-                    view: depthStencilTexture.createView(),
-                    depthLoadOp: "clear",
-                    depthStoreOp: "store",
-                    depthClearValue: 0.0,
-                    stencilLoadOp: "clear",
-                    stencilStoreOp: "discard",
-                    stencilClearValue: 0.0,
-                },
-                timestampWrites: renderpassQuery.getTimestampWritesForRenderpass(),
-            };
-
-            const cmdEncoder = renderer.createCmdEncoder({
-                label: "basic.wgsl pipeline",
-            });
-
-            const pass = cmdEncoder.beginRenderPass(renderpassDescriptor);
-            pass.setPipeline(basicPipeline);
-            pass.setBindGroup(0, bindGroup0);
-            pass.setIndexBuffer(indexBuffer, "uint16");
-            pass.drawIndexed(cube.indices.length, objectCount);
-            pass.end();
-
-            renderpassQuery.resolve(cmdEncoder);
-
-            const commandBuffer = cmdEncoder.finish();
-            renderer.submitCmdBuffers([commandBuffer]);
-
-            renderpassQuery.getTimePassed().then(timePassed => {
-                renderer.writeRenderpassMS(timePassed);
-            });
-        });
-    }
-    catch (ex) {
-        printException(ex);
-    }
-}
-
-///////////////////////////////////////////////////////////////////////////
-////////////////////////// EXCEPTION HANDLING /////////////////////////////
-///////////////////////////////////////////////////////////////////////////
-function printException(ex: unknown) {
-    const exceptionDiv = document.querySelector("#k90-exception") as HTMLDivElement;
-
-    if ((ex instanceof Error) && exceptionDiv) {
-        exceptionDiv.innerHTML += `[K90 EXCEPTION]: ${ex.message}<br><br>`;
-        exceptionDiv.innerHTML += `${ex.stack}`;
-        exceptionDiv.style.display = "flex";
-    }
-    else {
-        window.alert("K90: UNKNOWN EXCEPTION OCCURRED");
-    }
-}
-
-main();
