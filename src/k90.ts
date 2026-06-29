@@ -3,6 +3,7 @@
 ///////////////////////////////////////////////////////////////////////////
 import * as webgpuMemory from "./webgpu-memory/webgpu-memory.js";
 import * as webgpuUtils from "webgpu-utils";
+import { vec3, mat4 } from "wgpu-matrix";
 
 ///////////////////////////////////////////////////////////////////////////
 /////////////////////////////////// CONFIG ////////////////////////////////
@@ -1141,5 +1142,144 @@ export class Renderer {
     ///////////////////////////////////////////////////////////////////////////
     public getRenderHeight(): number {
         return this.canvas.height;
+    }
+}
+
+///////////////////////////////////////////////////////////////////////////
+///////////////////////////// FIRST PERSON CAMERA /////////////////////////
+///////////////////////////////////////////////////////////////////////////
+export class FirstPersonCamera {
+
+    ///////////////////////////////////////////////////////////////////////////
+    ////////////////////////////// INTERNAL PARAMS ////////////////////////////
+    ///////////////////////////////////////////////////////////////////////////
+    private readonly position = [0.0, 0.0, 2.0];
+    private readonly direction = [0.0, 0.0, -1.0];
+    private readonly up = [0.0, 1.0, 0.0];
+    private readonly velocity = [0.0, 0.0, 0.0];
+    private readonly rotation = [0.0, 0.0, 0.0];
+
+    ///////////////////////////////////////////////////////////////////////////
+    ////////////////////////////// PUBLIC PARAMS //////////////////////////////
+    ///////////////////////////////////////////////////////////////////////////
+    public movementSpeed = 0.1;
+    public rotationSpeed = 0.03;
+    public fovy = Util.toRadians(90.0);
+    public near = 1.0;
+    public far = 1000.0;
+    public smoothing = 5e-3;
+
+    ///////////////////////////////////////////////////////////////////////////
+    ////////////////////////////// INTERNAL STATE /////////////////////////////
+    ///////////////////////////////////////////////////////////////////////////
+    private isMovingForward = false;
+    private isMovingBackward = false;
+    private isMovingLeft = false;
+    private isMovingRight = false;
+    private isTurningLeft = false;
+    private isTurningRight = false;
+
+    ///////////////////////////////////////////////////////////////////////////
+    //////////////////////////////// CONSTRUCTOR //////////////////////////////
+    ///////////////////////////////////////////////////////////////////////////
+    public constructor(element: HTMLElement | Window) {
+        element.addEventListener("keydown", e => this.keydownCallback(e as KeyboardEvent));
+        element.addEventListener("keyup", e => this.keyupCallback(e as KeyboardEvent));
+    }
+
+    ///////////////////////////////////////////////////////////////////////////
+    ///////////////////////////////// CALLBACKS ///////////////////////////////
+    ///////////////////////////////////////////////////////////////////////////
+
+    ///////////////////////////////////////////////////////////////////////////
+    private keydownCallback(e: KeyboardEvent) {
+        if (e.key === "w") {
+            this.isMovingForward = true;
+            this.isMovingBackward = false;
+        }
+        else if (e.key === "s") {
+            this.isMovingForward = false;
+            this.isMovingBackward = true;
+        }
+        if (e.key === "a") {
+            this.isTurningLeft = true;
+            this.isTurningRight = false;
+        }
+        else if (e.key === "d") {
+            this.isTurningLeft = false;
+            this.isTurningRight = true;
+        }
+        if (e.key === "q") {
+            this.isMovingLeft = true;
+            this.isMovingRight = false;
+        }
+        else if (e.key === "e") {
+            this.isMovingLeft = false;
+            this.isMovingRight = true;
+        }
+    }
+
+    ///////////////////////////////////////////////////////////////////////////
+    private keyupCallback(e: KeyboardEvent) {
+        if (e.key === "w") {
+            this.isMovingForward = false;
+        }
+        else if (e.key === "s") {
+            this.isMovingBackward = false;
+        }
+        if (e.key === "a") {
+            this.isTurningLeft = false;
+        }
+        else if (e.key === "d") {
+            this.isTurningRight = false;
+        }
+        if (e.key === "q") {
+            this.isMovingLeft = false;
+        }
+        else if (e.key === "e") {
+            this.isMovingRight = false;
+        }
+    }
+
+    ///////////////////////////////////////////////////////////////////////////
+    public update(dt: number, aspect: number): Float32Array {
+        const proj = mat4.perspectiveReverseZ(this.fovy, aspect, this.near, this.far);
+
+        const newCameraVelocity = [0.0, 0.0, 0.0];
+
+        if (this.isMovingForward) {
+            vec3.add(this.direction, newCameraVelocity, newCameraVelocity);
+        }
+        else if (this.isMovingBackward) {
+            vec3.add(vec3.negate(this.direction), newCameraVelocity, newCameraVelocity);
+        }
+
+        if (this.isMovingLeft) {
+            vec3.add(vec3.negate(vec3.cross(this.direction, this.up)), newCameraVelocity, newCameraVelocity);
+        }
+        else if (this.isMovingRight) {
+            vec3.add(vec3.cross(this.direction, this.up), newCameraVelocity, newCameraVelocity);
+        }
+
+        const newCameraRotation = [0.0, 0.0, 0.0];
+        if (this.isTurningLeft) {
+            vec3.set(0.0, 1.0, 0.0, newCameraRotation);
+        }
+        else if (this.isTurningRight) {
+            vec3.set(0.0, -1.0, 0.0, newCameraRotation);
+        }
+
+        vec3.normalize(newCameraVelocity, newCameraVelocity);
+        vec3.mulScalar(newCameraVelocity, this.movementSpeed, newCameraVelocity);
+
+        vec3.lerp(this.velocity, newCameraVelocity, dt * this.smoothing, this.velocity);
+        vec3.add(this.position, this.velocity, this.position);
+
+        vec3.lerp(this.rotation, vec3.mulScalar(newCameraRotation, this.rotationSpeed), dt * this.smoothing, this.rotation);
+        vec3.rotateY(this.direction, [0.0, 0.0, 0.0], this.rotation[1] ?? 0.0, this.direction);
+
+        const view = mat4.lookAt(this.position, vec3.add(this.position, this.direction), this.up);
+
+        return mat4.mul(proj, view);
     }
 }
