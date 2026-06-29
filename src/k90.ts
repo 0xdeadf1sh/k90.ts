@@ -898,6 +898,17 @@ export class Renderer {
     }
 
     ///////////////////////////////////////////////////////////////////////////
+    public async createRenderBundleEncoder(desc: GPURenderBundleEncoderDescriptor): Promise<GPURenderBundleEncoder> {
+        this.device.pushErrorScope("validation");
+        const encoder = this.device.createRenderBundleEncoder(desc);
+        const err = await this.device.popErrorScope();
+        if (err) {
+            throw new Error(err.message);
+        }
+        return encoder;
+    }
+
+    ///////////////////////////////////////////////////////////////////////////
     public async createDepthStencilTexture(width: number,
         height: number): Promise<GPUTexture> {
 

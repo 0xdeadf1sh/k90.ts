@@ -126,6 +126,18 @@ async function main() {
             },
         });
 
+        const renderBundleEncoder = await renderer.createRenderBundleEncoder({
+            colorFormats: [renderer.getPresentationFormat()],
+            depthStencilFormat: "depth24plus-stencil8",
+        });
+
+        renderBundleEncoder.setPipeline(basicPipeline);
+        renderBundleEncoder.setBindGroup(0, bindGroup0);
+        renderBundleEncoder.setIndexBuffer(indexBuffer, "uint16");
+        renderBundleEncoder.drawIndexed(cube.indices.length, objectCount);
+
+        const renderBundle = renderBundleEncoder.finish();
+
         let totalTime: number = 0;
         let depthStencilTexture: GPUTexture | null = null;
 
@@ -283,10 +295,7 @@ async function main() {
             });
 
             const pass = cmdEncoder.beginRenderPass(renderpassDescriptor);
-            pass.setPipeline(basicPipeline);
-            pass.setBindGroup(0, bindGroup0);
-            pass.setIndexBuffer(indexBuffer, "uint16");
-            pass.drawIndexed(cube.indices.length, objectCount);
+            pass.executeBundles([renderBundle]);
             pass.end();
 
             renderpassQuery.resolve(cmdEncoder);
