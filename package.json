@@ -16,7 +16,7 @@
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1",
     "start": "vite --host 0.0.0.0 --port 3000 --strictPort --cors --logLevel info --clearScreen",
-    "build": "vite build --force"
+    "build": "vite build"
   },
   "devDependencies": {
     "@vitejs/plugin-basic-ssl": "^2.3.0",
