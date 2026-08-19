@@ -718,15 +718,12 @@ export class Renderer {
             throw new Error("Failed to retrieve GPU adapter!");
         }
 
-        Log.info(`gpu: ${adapter.info.description}`);
-        Log.info(`arch: ${adapter.info.architecture}`);
-        Log.info(`vendor: ${adapter.info.vendor}`);
-
         const device = await adapter.requestDevice({
             requiredFeatures: [
                 "core-features-and-limits",
                 "timestamp-query",
                 "shader-f16",
+                "chromium-experimental-multi-draw-indirect" as GPUFeatureName,
             ]
         });
         if (!device) {
@@ -737,6 +734,10 @@ export class Renderer {
         if (!canvas) {
             throw new Error(`Canvas id=${canvasId} doesn't exist!`);
         }
+
+        Log.info(`gpu: ${adapter.info.description}`);
+        Log.info(`arch: ${adapter.info.architecture}`);
+        Log.info(`vendor: ${adapter.info.vendor}`);
 
         return new Renderer({
             canvas,
@@ -753,7 +754,7 @@ export class Renderer {
         this.device = params.device;
 
         this.device.lost.then(info => {
-            throw new Error(`GPU device LOST due to ${info.reason}`);
+            throw new Error(`GPU device LOST reason='${info.reason}', message='${info.message}'`);
         });
 
         this.device.addEventListener("uncapturederror", event => {
